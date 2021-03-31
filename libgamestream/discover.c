@@ -17,6 +17,8 @@
  * along with Moonlight; if not, see <http://www.gnu.org/licenses/>.
  */
 
+#ifndef __WIIU__
+
 #include "errors.h"
 
 #include <avahi-client/client.h>
@@ -106,3 +108,5 @@ void gs_discover_server(char* dest) {
   if (simple_poll)
     avahi_simple_poll_free(simple_poll);
 }
+
+#endif

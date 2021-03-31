@@ -1,0 +1,32 @@
+; $MODE = "UniformRegister"
+
+; $NUM_SPI_PS_INPUT_CNTL = 1
+; texCoords R0
+; $SPI_PS_INPUT_CNTL[0].SEMANTIC = 0
+; $SPI_PS_INPUT_CNTL[0].DEFAULT_VAL = 1
+
+; $SAMPLER_VARS[0].name = "tex0"
+; $SAMPLER_VARS[0].type = "SAMPLER2D"
+; $SAMPLER_VARS[0].location = 0
+; $SAMPLER_VARS[1].name = "tex1"
+; $SAMPLER_VARS[1].type = "SAMPLER2D"
+; $SAMPLER_VARS[1].location = 1
+
+; converts NV12 to RGB
+; tex0 contains the Y plane, tex1 the UV plane
+; based on: https://gist.github.com/crearo/0d50442145b63c6c288d1c1675909990
+
+00 TEX: ADDR(48) CNT(2) VALID_PIX
+    0  SAMPLE R1, R0.xy0x, t0, s0
+    1  SAMPLE R2, R0.xy0x, t1, s1
+01 ALU: ADDR(32) CNT(11)
+    2  x: ADD    R2.x, R2.x,    -0.5
+       y: ADD    R2.y, R2.y,    -0.5 
+    3  x: MULADD R0.x, 1.13983, R2.y, R1.x
+       y: MUL    R0.y, 0.58060, R2.y
+       z: MULADD R0.z, 2.03211, R2.x, R1.x
+       w: MUL    R0.w, 0.39465, R2.x
+    4  y: ADD    R0.w, R1.x,    -R0.w
+    5  y: ADD    R0.y, R0.w,    -R0.y 
+02 EXP_DONE: PIX0, R0.xyz1
+END_OF_PROGRAM

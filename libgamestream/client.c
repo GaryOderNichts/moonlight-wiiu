@@ -30,7 +30,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
-#include <uuid/uuid.h>
+#include "uuid.h"
 #include <openssl/sha.h>
 #include <openssl/aes.h>
 #include <openssl/rand.h>
@@ -378,6 +378,25 @@ int gs_unpair(PSERVER_DATA server) {
   return ret;
 }
 
+#ifdef __WIIU__
+// Wii U doesn't like the %2hhx formatting so this is a quick and dirty hexstring converter
+// https://stackoverflow.com/a/53579348/11511475
+static void hex2bin(const char* in, size_t len, unsigned char* out) {
+  static const unsigned char TBL[] = {
+     0,   1,   2,   3,   4,   5,   6,   7,   8,   9,  58,  59,  60,  61,
+    62,  63,  64,  10,  11,  12,  13,  14,  15,  71,  72,  73,  74,  75,
+    76,  77,  78,  79,  80,  81,  82,  83,  84,  85,  86,  87,  88,  89,
+    90,  91,  92,  93,  94,  95,  96,  10,  11,  12,  13,  14,  15
+  };
+
+  static const unsigned char *LOOKUP = TBL - 48;
+
+  const char* end = in + len;
+
+  while(in < end) *(out++) = LOOKUP[*(in++)] << 4 | LOOKUP[*(in++)];
+}
+#endif
+
 int gs_pair(PSERVER_DATA server, char* pin) {
   int ret = GS_OK;
   char* result = NULL;
@@ -432,9 +451,13 @@ int gs_pair(PSERVER_DATA server, char* pin) {
   }
 
   char plaincert[8192];
+#ifndef __WIIU__
   for (int count = 0; count < strlen(result); count += 2) {
     sscanf(&result[count], "%2hhx", &plaincert[count / 2]);
   }
+#else
+  hex2bin(result, strlen(result), plaincert);
+#endif
   plaincert[strlen(result)/2] = '\0';
 
   unsigned char salt_pin[20];
@@ -487,9 +510,13 @@ int gs_pair(PSERVER_DATA server, char* pin) {
 
   char challenge_response_data_enc[48];
   char challenge_response_data[48];
+#ifndef __WIIU__
   for (int count = 0; count < strlen(result); count += 2) {
     sscanf(&result[count], "%2hhx", &challenge_response_data_enc[count / 2]);
   }
+#else
+  hex2bin(result, strlen(result), challenge_response_data_enc);
+#endif
 
   for (int i = 0; i < 48; i += 16) {
     AES_decrypt(&challenge_response_data_enc[i], &challenge_response_data[i], &dec_key);
@@ -545,9 +572,13 @@ int gs_pair(PSERVER_DATA server, char* pin) {
   }
 
   char pairing_secret[16 + 256];
+#ifndef __WIIU__
   for (int count = 0; count < strlen(result); count += 2) {
     sscanf(&result[count], "%2hhx", &pairing_secret[count / 2]);
   }
+#else
+  hex2bin(result, strlen(result), pairing_secret);
+#endif
 
   if (!verifySignature(pairing_secret, 16, pairing_secret+16, 256, plaincert)) {
     gs_error = "MITM attack detected";
@@ -755,7 +786,12 @@ int gs_quit_app(PSERVER_DATA server) {
 }
 
 int gs_init(PSERVER_DATA server, char *address, const char *keyDirectory, int log_level, bool unsupported) {
+#ifndef __WIIU__
   mkdirtree(keyDirectory);
+#else
+  // the above will fail on the Wii U due to the /vol/external01
+  mkdir(keyDirectory, 0775);
+#endif
   if (load_unique_id(keyDirectory) != GS_OK)
     return GS_FAILED;
 

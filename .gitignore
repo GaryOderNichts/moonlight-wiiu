@@ -1,0 +1,6 @@
+/.vscode/
+/build/
+*.rpx
+*.elf
+*.gsh
+latte-assembler

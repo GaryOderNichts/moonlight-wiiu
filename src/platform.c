@@ -17,7 +17,9 @@
  * along with Moonlight; if not, see <http://www.gnu.org/licenses/>.
  */
 
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 
 #include "platform.h"
 
@@ -26,15 +28,24 @@
 #include "audio/audio.h"
 #include "video/video.h"
 
+#ifdef __WIIU__
+#include "wiiu/wiiu.h"
+#endif
+
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#ifndef __WIIU__
 #include <dlfcn.h>
+#endif
 
 typedef bool(*ImxInit)();
 
 enum platform platform_check(char* name) {
   bool std = strcmp(name, "auto") == 0;
+  #ifdef __WIIU__
+    return WIIU;
+  #endif
   #ifdef HAVE_IMX
   if (std || strcmp(name, "imx") == 0) {
     void *handle = dlopen("libmoonlight-imx.so", RTLD_NOW | RTLD_GLOBAL);
@@ -134,6 +145,10 @@ void platform_stop(enum platform system) {
 
 DECODER_RENDERER_CALLBACKS* platform_get_video(enum platform system) {
   switch (system) {
+#ifdef __WIIU__
+  case WIIU:
+    return &decoder_callbacks_wiiu;
+#endif
   #ifdef HAVE_X11
   case X11:
     return &decoder_callbacks_x11;
@@ -176,6 +191,10 @@ DECODER_RENDERER_CALLBACKS* platform_get_video(enum platform system) {
 
 AUDIO_RENDERER_CALLBACKS* platform_get_audio(enum platform system, char* audio_device) {
   switch (system) {
+  #ifdef __WIIU__
+  case WIIU:
+    return &audio_callbacks_wiiu;
+  #endif
   #ifdef HAVE_SDL
   case SDL:
     return &audio_callbacks_sdl;
@@ -193,6 +212,7 @@ AUDIO_RENDERER_CALLBACKS* platform_get_audio(enum platform system, char* audio_d
     #ifdef HAVE_ALSA
     return &audio_callbacks_alsa;
     #endif
+    break;
   }
   return NULL;
 }
@@ -208,6 +228,8 @@ bool platform_supports_hevc(enum platform system) {
 
 char* platform_name(enum platform system) {
   switch(system) {
+  case WIIU:
+    return "Nintendo Wii U";
   case PI:
     return "Raspberry Pi (Broadcom)";
   case MMAL:

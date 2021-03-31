@@ -21,6 +21,8 @@
 
 #include "connection.h"
 
+#ifndef __WIIU__
+
 #include <sys/stat.h>
 #include <sys/signalfd.h>
 #include <stdlib.h>
@@ -113,3 +115,5 @@ void loop_main() {
     }
   }
 }
+
+#endif

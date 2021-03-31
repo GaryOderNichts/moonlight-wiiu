@@ -23,13 +23,21 @@
 #include <stdarg.h>
 #include <signal.h>
 
+#ifdef __WIIU__
+#include <whb/proc.h>
+#endif
+
 pthread_t main_thread_id = 0;
 bool connection_debug;
 ConnListenerRumble rumble_handler = NULL;
 
 static void connection_terminated() {
+#ifndef __WIIU__
   if (main_thread_id != 0)
     pthread_kill(main_thread_id, SIGTERM);
+#else
+  WHBProcStopRunning();
+#endif
 }
 
 static void connection_log_message(const char* format, ...) {

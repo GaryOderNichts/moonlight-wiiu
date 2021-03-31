@@ -1,0 +1,98 @@
+#pragma once
+
+#include "Limelight.h"
+#include "Platform.h"
+#include "PlatformSockets.h"
+#include "PlatformThreads.h"
+#include "Video.h"
+#include "RtpFecQueue.h"
+
+#include <enet/enet.h>
+
+// Common globals
+extern char* RemoteAddrString;
+extern struct sockaddr_storage RemoteAddr;
+extern SOCKADDR_LEN RemoteAddrLen;
+extern int AppVersionQuad[4];
+extern STREAM_CONFIGURATION StreamConfig;
+extern CONNECTION_LISTENER_CALLBACKS ListenerCallbacks;
+extern DECODER_RENDERER_CALLBACKS VideoCallbacks;
+extern AUDIO_RENDERER_CALLBACKS AudioCallbacks;
+extern int NegotiatedVideoFormat;
+extern volatile bool ConnectionInterrupted;
+extern bool HighQualitySurroundSupported;
+extern bool HighQualitySurroundEnabled;
+extern OPUS_MULTISTREAM_CONFIGURATION NormalQualityOpusConfig;
+extern OPUS_MULTISTREAM_CONFIGURATION HighQualityOpusConfig;
+extern int OriginalVideoBitrate;
+extern int AudioPacketDuration;
+
+#ifndef UINT24_MAX
+#define UINT24_MAX 0xFFFFFF
+#endif
+
+#define U16(x) ((unsigned short) ((x) & UINT16_MAX))
+#define U24(x) ((unsigned int) ((x) & UINT24_MAX))
+#define U32(x) ((unsigned int) ((x) & UINT32_MAX))
+
+#define isBefore16(x, y) (U16((x) - (y)) > (UINT16_MAX/2))
+#define isBefore24(x, y) (U24((x) - (y)) > (UINT24_MAX/2))
+#define isBefore32(x, y) (U32((x) - (y)) > (UINT32_MAX/2))
+
+#define UDP_RECV_POLL_TIMEOUT_MS 100
+
+// At this value or above, we will request high quality audio unless CAPABILITY_SLOW_OPUS_DECODER
+// is set on the audio renderer.
+#define HIGH_AUDIO_BITRATE_THRESHOLD 15000
+
+// Below this value, we will request 20 ms audio frames to reduce bandwidth if the audio
+// renderer sets CAPABILITY_SUPPORTS_ARBITRARY_AUDIO_DURATION.
+#define LOW_AUDIO_BITRATE_TRESHOLD 5000
+
+// Internal macro for checking the magic byte of the audio configuration value
+#define MAGIC_BYTE_FROM_AUDIO_CONFIG(x) ((x) & 0xFF)
+
+int serviceEnetHost(ENetHost* client, ENetEvent* event, enet_uint32 timeoutMs);
+int extractVersionQuadFromString(const char* string, int* quad);
+bool isReferenceFrameInvalidationEnabled(void);
+void* extendBuffer(void* ptr, size_t newSize);
+
+void fixupMissingCallbacks(PDECODER_RENDERER_CALLBACKS* drCallbacks, PAUDIO_RENDERER_CALLBACKS* arCallbacks,
+    PCONNECTION_LISTENER_CALLBACKS* clCallbacks);
+
+char* getSdpPayloadForStreamConfig(int rtspClientVersion, int* length);
+
+int initializeControlStream(void);
+int startControlStream(void);
+int stopControlStream(void);
+void destroyControlStream(void);
+void requestIdrOnDemand(void);
+void connectionDetectedFrameLoss(int startFrame, int endFrame);
+void connectionReceivedCompleteFrame(int frameIndex);
+void connectionSawFrame(int frameIndex);
+void connectionLostPackets(int lastReceivedPacket, int nextReceivedPacket);
+int sendInputPacketOnControlStream(unsigned char* data, int length);
+
+int performRtspHandshake(void);
+
+void initializeVideoDepacketizer(int pktSize);
+void destroyVideoDepacketizer(void);
+void queueRtpPacket(PRTPFEC_QUEUE_ENTRY queueEntry);
+void stopVideoDepacketizer(void);
+void requestDecoderRefresh(void);
+
+void initializeVideoStream(void);
+void destroyVideoStream(void);
+int startVideoStream(void* rendererContext, int drFlags);
+void submitFrame(PQUEUED_DECODE_UNIT qdu);
+void stopVideoStream(void);
+
+void initializeAudioStream(void);
+void destroyAudioStream(void);
+int startAudioStream(void* audioContext, int arFlags);
+void stopAudioStream(void);
+
+int initializeInputStream(void);
+void destroyInputStream(void);
+int startInputStream(void);
+int stopInputStream(void);
