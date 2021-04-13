@@ -33,6 +33,9 @@
 
 #ifdef __WIIU__
 extern int disable_gamepad;
+extern int swap_buttons;
+
+extern ssize_t getline(char **buf, size_t *bufsiz, FILE *fp);
 
 #define MOONLIGHT_WIIU_PATH "/vol/external01/wiiu/apps/moonlight"
 #endif
@@ -79,6 +82,7 @@ static struct option long_options[] = {
   {"debug", no_argument, NULL, 'Z'},
 #ifdef __WIIU__
   {"disable_gamepad", no_argument, NULL, 'A'},
+  {"swap_buttons", no_argument, NULL, 'B'},
 #endif
   {0, 0, 0, 0},
 };
@@ -247,6 +251,9 @@ static void parse_argument(int c, char* value, PCONFIGURATION config) {
 #ifdef __WIIU__
   case 'A':
     disable_gamepad = true;
+    break;
+  case 'B':
+    swap_buttons = true;
     break;
 #endif
   case 1:

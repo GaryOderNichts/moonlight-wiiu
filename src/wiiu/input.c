@@ -5,6 +5,7 @@
 #include <padscore/wpad.h>
 
 int disable_gamepad = 0;
+int swap_buttons = 0;
 
 void wiiu_input_init(void)
 {
@@ -26,10 +27,18 @@ void wiiu_input_update(void) {
     uint32_t btns = vpad.hold;
     short buttonFlags = 0;
 #define CHECKBTN(v, f) if (btns & v) buttonFlags |= f;
-    CHECKBTN(VPAD_BUTTON_A,       A_FLAG);
-    CHECKBTN(VPAD_BUTTON_B,       B_FLAG);
-    CHECKBTN(VPAD_BUTTON_X,       X_FLAG);
-    CHECKBTN(VPAD_BUTTON_Y,       Y_FLAG);
+    if (swap_buttons) {
+      CHECKBTN(VPAD_BUTTON_A,       B_FLAG);
+      CHECKBTN(VPAD_BUTTON_B,       A_FLAG);
+      CHECKBTN(VPAD_BUTTON_X,       Y_FLAG);
+      CHECKBTN(VPAD_BUTTON_Y,       X_FLAG);
+    }
+    else {
+      CHECKBTN(VPAD_BUTTON_A,       A_FLAG);
+      CHECKBTN(VPAD_BUTTON_B,       B_FLAG);
+      CHECKBTN(VPAD_BUTTON_X,       X_FLAG);
+      CHECKBTN(VPAD_BUTTON_Y,       Y_FLAG);
+    }
     CHECKBTN(VPAD_BUTTON_UP,      UP_FLAG);
     CHECKBTN(VPAD_BUTTON_DOWN,    DOWN_FLAG);
     CHECKBTN(VPAD_BUTTON_LEFT,    LEFT_FLAG);
@@ -58,10 +67,18 @@ void wiiu_input_update(void) {
         uint32_t btns = kpad_data.pro.hold;
         short buttonFlags = 0;
 #define CHECKBTN(v, f) if (btns & v) buttonFlags |= f;
-        CHECKBTN(WPAD_PRO_BUTTON_A,       A_FLAG);
-        CHECKBTN(WPAD_PRO_BUTTON_B,       B_FLAG);
-        CHECKBTN(WPAD_PRO_BUTTON_X,       X_FLAG);
-        CHECKBTN(WPAD_PRO_BUTTON_Y,       Y_FLAG);
+        if (swap_buttons) {
+          CHECKBTN(WPAD_PRO_BUTTON_A,       B_FLAG);
+          CHECKBTN(WPAD_PRO_BUTTON_B,       A_FLAG);
+          CHECKBTN(WPAD_PRO_BUTTON_X,       Y_FLAG);
+          CHECKBTN(WPAD_PRO_BUTTON_Y,       X_FLAG);
+        }
+        else {
+          CHECKBTN(WPAD_PRO_BUTTON_A,       A_FLAG);
+          CHECKBTN(WPAD_PRO_BUTTON_B,       B_FLAG);
+          CHECKBTN(WPAD_PRO_BUTTON_X,       X_FLAG);
+          CHECKBTN(WPAD_PRO_BUTTON_Y,       Y_FLAG);
+        }
         CHECKBTN(WPAD_PRO_BUTTON_UP,      UP_FLAG);
         CHECKBTN(WPAD_PRO_BUTTON_DOWN,    DOWN_FLAG);
         CHECKBTN(WPAD_PRO_BUTTON_LEFT,    LEFT_FLAG);
@@ -84,10 +101,18 @@ void wiiu_input_update(void) {
         uint32_t btns = kpad_data.classic.hold;
         short buttonFlags = 0;
 #define CHECKBTN(v, f) if (btns & v) buttonFlags |= f;
-        CHECKBTN(WPAD_CLASSIC_BUTTON_A,       A_FLAG);
-        CHECKBTN(WPAD_CLASSIC_BUTTON_B,       B_FLAG);
-        CHECKBTN(WPAD_CLASSIC_BUTTON_X,       X_FLAG);
-        CHECKBTN(WPAD_CLASSIC_BUTTON_Y,       Y_FLAG);
+        if (swap_buttons) {
+          CHECKBTN(WPAD_CLASSIC_BUTTON_A,       B_FLAG);
+          CHECKBTN(WPAD_CLASSIC_BUTTON_B,       A_FLAG);
+          CHECKBTN(WPAD_CLASSIC_BUTTON_X,       Y_FLAG);
+          CHECKBTN(WPAD_CLASSIC_BUTTON_Y,       X_FLAG);
+        }
+        else {
+          CHECKBTN(WPAD_CLASSIC_BUTTON_A,       A_FLAG);
+          CHECKBTN(WPAD_CLASSIC_BUTTON_B,       B_FLAG);
+          CHECKBTN(WPAD_CLASSIC_BUTTON_X,       X_FLAG);
+          CHECKBTN(WPAD_CLASSIC_BUTTON_Y,       Y_FLAG);
+        }
         CHECKBTN(WPAD_CLASSIC_BUTTON_UP,      UP_FLAG);
         CHECKBTN(WPAD_CLASSIC_BUTTON_DOWN,    DOWN_FLAG);
         CHECKBTN(WPAD_CLASSIC_BUTTON_LEFT,    LEFT_FLAG);
