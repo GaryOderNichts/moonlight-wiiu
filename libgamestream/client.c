@@ -30,6 +30,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <arpa/inet.h>
 #include "uuid.h"
 #include <openssl/sha.h>
 #include <openssl/aes.h>
@@ -87,11 +88,7 @@ static int load_unique_id(const char* keyDirectory) {
 
   FILE *fd = fopen(uniqueFilePath, "r");
   if (fd == NULL) {
-    unsigned char unique_data[UNIQUEID_BYTES];
-    RAND_bytes(unique_data, UNIQUEID_BYTES);
-    for (int i = 0; i < UNIQUEID_BYTES; i++) {
-      sprintf(unique_id + (i * 2), "%02x", unique_data[i]);
-    }
+    snprintf(unique_id, UNIQUEID_CHARS+1, "0123456789ABCDEF");
     fd = fopen(uniqueFilePath, "w");
     if (fd == NULL)
       return GS_FAILED;
@@ -704,10 +701,14 @@ int gs_start_app(PSERVER_DATA server, STREAM_CONFIGURATION *config, int appId, b
 
   RAND_bytes(config->remoteInputAesKey, 16);
   memset(config->remoteInputAesIv, 0, 16);
+  // GFE somehow doesn't like this totally legit random number, so we have to generate one
+  RAND_bytes(config->remoteInputAesIv, 4);
 
   srand(time(NULL));
   char url[4096];
   u_int32_t rikeyid = 0;
+  memset(&rikeyid, config->remoteInputAesIv, 4);
+  rikeyid = htonl(rikeyid);
   char rikey_hex[33];
   bytes_to_hex(config->remoteInputAesKey, rikey_hex, 16);
 
