@@ -265,7 +265,7 @@ int main(int argc, char* argv[]) {
   while (WHBProcIsRunning()) {
     wiiu_screen_clear();
 
-    wiiu_screen_print(0, 0, "Moonlight Wii U v1.0 (Connected to %s)", config.address);
+    wiiu_screen_print(0, 0, "Moonlight Wii U v1.2 (Connected to %s)", config.address);
     wiiu_screen_print(0, 1, "=======================================================");
     wiiu_screen_print(0, 3, "Press A to stream, Press B to pair");
 
