@@ -7,7 +7,7 @@
 
 #include <whb/proc.h>
 #include <whb/gfx.h>
-#include <coreinit/mutex.h>
+#include <coreinit/fastmutex.h>
 #include <gx2/mem.h>
 #include <gx2/draw.h>
 #include <gx2/registers.h>
@@ -29,7 +29,7 @@ static float drcScreenSize[2];
 uint32_t currentFrame;
 uint32_t nextFrame;
 
-static OSMutex queueMutex;
+static OSFastMutex queueMutex;
 static yuv_texture_t* queueMessages[MAX_QUEUEMESSAGES];
 static uint32_t queueWriteIndex;
 static uint32_t queueReadIndex;
@@ -38,7 +38,7 @@ void wiiu_init(uint32_t width, uint32_t height)
 {
   currentFrame = nextFrame = 0;
 
-  OSInitMutex(&queueMutex);
+  OSFastMutex_Init(&queueMutex, "");
   queueReadIndex = queueWriteIndex = 0;
 
   wiiu_screen_exit();
@@ -225,33 +225,33 @@ void wiiu_error_exit(char* fmt, ...)
 
 void* get_frame(void)
 {
-  OSLockMutex(&queueMutex);
+  OSFastMutex_Lock(&queueMutex);
 
   uint32_t elements_in = queueWriteIndex - queueReadIndex;
   if(elements_in == 0) {
-    OSUnlockMutex(&queueMutex);
+    OSFastMutex_Unlock(&queueMutex);
     return NULL; // framequeue is empty
   }
 
   uint32_t i = (queueReadIndex)++ & (MAX_QUEUEMESSAGES - 1);
   yuv_texture_t* message = queueMessages[i];
 
-  OSUnlockMutex(&queueMutex);
+  OSFastMutex_Unlock(&queueMutex);
   return message;
 }
 
 void add_frame(yuv_texture_t* msg)
 {
-  OSLockMutex(&queueMutex);
+  OSFastMutex_Lock(&queueMutex);
 
   uint32_t elements_in = queueWriteIndex - queueReadIndex;
   if (elements_in == MAX_QUEUEMESSAGES) {
-    OSUnlockMutex(&queueMutex);
+    OSFastMutex_Unlock(&queueMutex);
     return; // framequeue is full
   }
 
   uint32_t i = (queueWriteIndex)++ & (MAX_QUEUEMESSAGES - 1);
   queueMessages[i] = msg;
 
-  OSUnlockMutex(&queueMutex);
+  OSFastMutex_Unlock(&queueMutex);
 }
