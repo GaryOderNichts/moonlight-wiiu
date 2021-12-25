@@ -216,6 +216,8 @@ void wiiu_error_exit(char* fmt, ...)
 
   wiiu_screen_draw();
 
+  // Re-enable home button detection for exit
+  WHBProcInit();
   while (WHBProcIsRunning());
 
   wiiu_screen_exit();

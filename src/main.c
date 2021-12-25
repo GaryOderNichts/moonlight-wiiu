@@ -198,6 +198,11 @@ static void stream(PSERVER_DATA server, PCONFIGURATION config, enum platform sys
 #ifdef __WIIU__
 int main(int argc, char* argv[]) {
   WHBProcInit();
+  // `WHBProcInit()` will register a `ProcUI` callback for the user pressing
+  // the HOME button, which just quits the program. We want to use it as an
+  // input and have an alternative way to exit, so we clear the callback before
+  // any others are created. This should be the only callback currently registered.
+  ProcUIClearCallbacks();
 
 #ifdef DEBUG
   Debug_Init();

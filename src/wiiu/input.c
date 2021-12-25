@@ -3,6 +3,9 @@
 #include <vpad/input.h>
 #include <padscore/kpad.h>
 #include <padscore/wpad.h>
+#include <coreinit/time.h>
+
+#define millis() OSTicksToMilliseconds(OSGetTime())
 
 int disable_gamepad = 0;
 int swap_buttons = 0;
@@ -49,7 +52,13 @@ void wiiu_input_update(void) {
     CHECKBTN(VPAD_BUTTON_STICK_R, RS_CLK_FLAG);
     CHECKBTN(VPAD_BUTTON_PLUS,    PLAY_FLAG);
     CHECKBTN(VPAD_BUTTON_MINUS,   BACK_FLAG);
+    CHECKBTN(VPAD_BUTTON_HOME,    SPECIAL_FLAG);
 #undef CHECKBTN
+
+    static uint64_t home_pressed = 0;
+    // If the button was just pressed, reset to current time
+    if (vpad.trigger & VPAD_BUTTON_HOME) home_pressed = millis();
+    if (btns & VPAD_BUTTON_HOME && millis() - home_pressed > 3000) wiiu_error_exit("Goodbye!");
 
     LiSendMultiControllerEvent(controllerNumber++, gamepad_mask, buttonFlags,
       (vpad.hold & VPAD_BUTTON_ZL) ? 0xFF : 0,
