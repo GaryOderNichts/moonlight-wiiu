@@ -62,9 +62,7 @@
 #include <whb/proc.h>
 #include <coreinit/time.h>
 #include <vpad/input.h>
-#ifdef DEBUG
-void Debug_Init();
-#endif
+#include "wiiu/debug.c"
 #endif
 
 static void applist(PSERVER_DATA server) {
