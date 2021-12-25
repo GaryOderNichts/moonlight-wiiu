@@ -103,14 +103,13 @@ void wiiu_init(uint32_t width, uint32_t height)
 void wiiu_loop(void)
 {
   while(WHBProcIsRunning()) {
+    wiiu_input_update();
     yuv_texture_t* tex = get_frame();
     if (tex) {
       if (++currentFrame <= nextFrame - NUM_BUFFERS) {
         // display thread is behind decoder, skip frame
-      } 
+      }
       else {
-        wiiu_input_update();
-
         WHBGfxBeginRender();
 
         // TV
