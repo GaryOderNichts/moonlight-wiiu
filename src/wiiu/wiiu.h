@@ -1,13 +1,12 @@
 #pragma once
 
+#define _GNU_SOURCE
 #include <Limelight.h>
 #include <stdint.h>
 #include <stdbool.h>
 
 #include <gx2/texture.h>
 
-#define MAX_CHANNEL_COUNT 6
-#define FRAME_SIZE 240
 #define FRAME_BUFFER 12
 
 void wiiu_init(uint32_t width, uint32_t height);

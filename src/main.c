@@ -62,7 +62,9 @@
 #include <whb/proc.h>
 #include <coreinit/time.h>
 #include <vpad/input.h>
-#include "wiiu/debug.c"
+#ifdef DEBUG
+void Debug_Init();
+#endif
 #endif
 
 static void applist(PSERVER_DATA server) {
@@ -215,14 +217,6 @@ int main(int argc, char* argv[]) {
 
   wiiu_screen_init();
   wiiu_input_init();
-
-  // since openssl is built without random seed the random manually
-  uint8_t buf[64];
-  for (int i = 0; i < sizeof(buf); i++) {
-    srand(OSGetSystemTick());
-    buf[i] = rand() ^ rand() ^ rand();
-  }
-  RAND_seed(buf, sizeof(buf));
 
   CONFIGURATION config;
   config_parse(argc, argv, &config);
