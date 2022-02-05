@@ -3,9 +3,67 @@
 #include <vpad/input.h>
 #include <padscore/kpad.h>
 #include <padscore/wpad.h>
+#include <coreinit/time.h>
+
+#define millis() OSTicksToMilliseconds(OSGetTime())
 
 int disable_gamepad = 0;
 int swap_buttons = 0;
+
+char lastTouched = 0;
+
+uint16_t last_x = 0;
+uint16_t last_y = 0;
+
+#define TAP_MILLIS 100
+#define DRAG_DISTANCE 10
+uint64_t touchDownMillis = 0;
+
+void handleTouch(VPADTouchData touch) {
+  // Just pressed (run this twice to allow touch position to settle)
+  if (lastTouched < 2 && touch.touched) {
+    touchDownMillis = millis();
+    last_x = touch.x;
+    last_y = touch.y;
+
+    lastTouched++;
+    return; // We can't do much until we wait for a few hundred milliseconds
+            // since we don't know if it's a tap, a tap-and-hold, or a drag
+  }
+
+  // Just released
+  if (lastTouched && !touch.touched) {
+    if (millis() - touchDownMillis < TAP_MILLIS) {
+      LiSendMouseButtonEvent(BUTTON_ACTION_PRESS, BUTTON_LEFT);
+      sleep(0.1);
+      LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, BUTTON_LEFT);
+    }
+  }
+
+  if (touch.touched) {
+    // Holding & dragging screen, not just tapping
+    if (millis() - touchDownMillis > TAP_MILLIS || touchDownMillis == 0) {
+      if (touch.x != last_x || touch.y != last_y) // Don't send extra data if we don't need to
+        LiSendMouseMoveEvent(touch.x - last_x, touch.y - last_y);
+      last_x = touch.x;
+      last_y = touch.y;
+    } else {
+      if (touch.x - last_x < -10 || touch.x - last_x > 10) touchDownMillis=0;
+      if (touch.y - last_y < -10 || touch.y - last_y > 10) touchDownMillis=0;
+      int16_t diff_x = touch.x - last_x;
+      int16_t diff_y = touch.y - last_y;
+      if (diff_x < 0) diff_x = -diff_x;
+      if (diff_y < 0) diff_y = -diff_y;
+      if (diff_x + diff_y > DRAG_DISTANCE) touchDownMillis = 0;
+    }
+  }
+
+  // Absolute positioning:
+  // LiSendMousePositionEvent(touch.x, touch.y, WIDTH, HEIGHT);
+
+
+  lastTouched = touch.touched ? lastTouched : 0; // Keep value unless released
+}
 
 void wiiu_input_init(void)
 {
@@ -49,13 +107,23 @@ void wiiu_input_update(void) {
     CHECKBTN(VPAD_BUTTON_STICK_R, RS_CLK_FLAG);
     CHECKBTN(VPAD_BUTTON_PLUS,    PLAY_FLAG);
     CHECKBTN(VPAD_BUTTON_MINUS,   BACK_FLAG);
+    CHECKBTN(VPAD_BUTTON_HOME,    SPECIAL_FLAG);
 #undef CHECKBTN
+
+    static uint64_t home_pressed = 0;
+    // If the button was just pressed, reset to current time
+    if (vpad.trigger & VPAD_BUTTON_HOME) home_pressed = millis();
+    if (btns & VPAD_BUTTON_HOME && millis() - home_pressed > 3000) wiiu_error_exit("Goodbye!");
 
     LiSendMultiControllerEvent(controllerNumber++, gamepad_mask, buttonFlags,
       (vpad.hold & VPAD_BUTTON_ZL) ? 0xFF : 0,
       (vpad.hold & VPAD_BUTTON_ZR) ? 0xFF : 0,
       vpad.leftStick.x * INT16_MAX, vpad.leftStick.y * INT16_MAX,
       vpad.rightStick.x * INT16_MAX, vpad.rightStick.y * INT16_MAX);
+
+    VPADTouchData touch;
+    VPADGetTPCalibratedPoint(VPAD_CHAN_0, &touch, &vpad.tpNormal);
+    handleTouch(touch);
   }
 
   KPADStatus kpad_data = {0};

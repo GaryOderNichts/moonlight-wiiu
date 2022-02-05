@@ -124,6 +124,8 @@ void platform_start(enum platform system) {
     blank_fb("/sys/class/graphics/fb0/blank", true);
     break;
   #endif
+  default:
+    break;
   }
 }
 
@@ -140,6 +142,8 @@ void platform_stop(enum platform system) {
     blank_fb("/sys/class/graphics/fb0/blank", false);
     break;
   #endif
+  default:
+    break;
   }
 }
 
@@ -185,6 +189,8 @@ DECODER_RENDERER_CALLBACKS* platform_get_video(enum platform system) {
   case RK:
     return (PDECODER_RENDERER_CALLBACKS) dlsym(RTLD_DEFAULT, "decoder_callbacks_rk");
   #endif
+  default:
+    break;
   }
   return NULL;
 }
@@ -222,6 +228,8 @@ bool platform_supports_hevc(enum platform system) {
   case AML:
   case RK:
     return true;
+  default:
+    break;
   }
   return false;
 }

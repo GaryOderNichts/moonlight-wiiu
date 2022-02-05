@@ -62,9 +62,7 @@
 #include <whb/proc.h>
 #include <coreinit/time.h>
 #include <vpad/input.h>
-#ifdef DEBUG
-void Debug_Init();
-#endif
+#include "wiiu/debug.c"
 #endif
 
 static void applist(PSERVER_DATA server) {
@@ -200,6 +198,11 @@ static void stream(PSERVER_DATA server, PCONFIGURATION config, enum platform sys
 #ifdef __WIIU__
 int main(int argc, char* argv[]) {
   WHBProcInit();
+  // `WHBProcInit()` will register a `ProcUI` callback for the user pressing
+  // the HOME button, which just quits the program. We want to use it as an
+  // input and have an alternative way to exit, so we clear the callback before
+  // any others are created. This should be the only callback currently registered.
+  ProcUIClearCallbacks();
 
 #ifdef DEBUG
   Debug_Init();
@@ -262,76 +265,46 @@ int main(int argc, char* argv[]) {
   if (config.debug_level > 0)
     printf("NVIDIA %s, GFE %s (%s, %s)\n", server.gpuType, server.serverInfo.serverInfoGfeVersion, server.gsVersion, server.serverInfo.serverInfoAppVersion);
 
-  while (WHBProcIsRunning()) {
+  wiiu_screen_clear();
+
+  wiiu_screen_print(0, 0, "Moonlight Wii U v1.2 (Connected to %s)", config.address);
+  wiiu_screen_print(0, 1, "=======================================================");
+
+  wiiu_screen_draw();
+
+  while (!server.paired) {
+    char pin[5];
+    sprintf(pin, "%d%d%d%d", (int)random() % 10, (int)random() % 10, (int)random() % 10, (int)random() % 10);
+    printf("Please enter the following PIN on the target PC: %s\n", pin);
     wiiu_screen_clear();
-
-    wiiu_screen_print(0, 0, "Moonlight Wii U v1.2 (Connected to %s)", config.address);
-    wiiu_screen_print(0, 1, "=======================================================");
-    wiiu_screen_print(0, 3, "Press A to stream, Press B to pair");
-
+    wiiu_screen_print(0, 0, "Please enter the following PIN on the target PC: %s\n", pin);
     wiiu_screen_draw();
-
-    uint32_t btns = wiiu_input_buttons_triggered();
-
-    if (btns & VPAD_BUTTON_A) {
-      // stream
-      if (server.paired) {
-        enum platform system = platform_check(config.platform);
-        if (config.debug_level > 0)
-          printf("Platform %s\n", platform_name(system));
-
-        if (system == 0) {
-          fprintf(stderr, "Platform '%s' not found\n", config.platform);
-          wiiu_error_exit("Platform '%s' not found\n", config.platform);
-        }
-        config.stream.supportsHevc = config.codec != CODEC_H264 && (config.codec == CODEC_HEVC || platform_supports_hevc(system));
-
-        stream(&server, &config, system);
-        break;
-      }
-      else {
-        printf("You must pair with the PC first\n");
-        wiiu_screen_clear();
-        wiiu_screen_print(0, 0, "You must pair with the PC first\n");
-        wiiu_screen_draw();
-        sleep(4);
-      }
-    } else if (btns & VPAD_BUTTON_B) {
-      // pair
-      char pin[5];
-      sprintf(pin, "%d%d%d%d", (int)random() % 10, (int)random() % 10, (int)random() % 10, (int)random() % 10);
-      printf("Please enter the following PIN on the target PC: %s\n", pin);
+    if (gs_pair(&server, &pin[0]) != GS_OK) {
+      fprintf(stderr, "Failed to pair to server: %s\n", gs_error);
       wiiu_screen_clear();
-      wiiu_screen_print(0, 0, "Please enter the following PIN on the target PC: %s\n", pin);
+      wiiu_screen_print(0, 0, "Failed to pair to server: %s\n", gs_error);
       wiiu_screen_draw();
-      if (gs_pair(&server, &pin[0]) != GS_OK) {
-        fprintf(stderr, "Failed to pair to server: %s\n", gs_error);
-        wiiu_screen_clear();
-        wiiu_screen_print(0, 0, "Failed to pair to server: %s\n", gs_error);
-        wiiu_screen_draw();
-        sleep(4);
-      } else {
-        printf("Succesfully paired\n");
-        wiiu_screen_clear();
-        wiiu_screen_print(0, 0, "Succesfully paired\n");
-        wiiu_screen_draw();
-        sleep(3);
-      }
-    } 
-    
-    // list
-    // pair_check(&server);
-    // applist(&server);
-    // unpair
-    // if (gs_unpair(&server) != GS_OK) {
-    //   fprintf(stderr, "Failed to unpair to server: %s\n", gs_error);
-    // } else {
-    //   printf("Succesfully unpaired\n");
-    // }
-    // quit
-    // pair_check(&server);
-    // gs_quit_app(&server);
+      sleep(4);
+    } else {
+      printf("Succesfully paired\n");
+      wiiu_screen_clear();
+      wiiu_screen_print(0, 0, "Succesfully paired\n");
+      wiiu_screen_draw();
+      sleep(3);
+    }
   }
+
+  enum platform system = platform_check(config.platform);
+  if (config.debug_level > 0)
+    printf("Platform %s\n", platform_name(system));
+
+  if (system == 0) {
+    fprintf(stderr, "Platform '%s' not found\n", config.platform);
+    wiiu_error_exit("Platform '%s' not found\n", config.platform);
+  }
+  config.stream.supportsHevc = config.codec != CODEC_H264 && (config.codec == CODEC_HEVC || platform_supports_hevc(system));
+
+  stream(&server, &config, system);
 
   wiiu_screen_exit();
   WHBProcShutdown();
