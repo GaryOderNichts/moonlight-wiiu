@@ -27,12 +27,43 @@
 #include <whb/proc.h>
 #endif
 
+#ifdef HAVE_SDL
+#include <SDL.h>
+#endif
+
 pthread_t main_thread_id = 0;
 bool connection_debug;
 ConnListenerRumble rumble_handler = NULL;
 
-static void connection_terminated() {
+static void connection_terminated(int errorCode) {
+  switch (errorCode) {
+  case ML_ERROR_GRACEFUL_TERMINATION:
+    printf("Connection has been terminated gracefully.\n");
+    break;
+  case ML_ERROR_NO_VIDEO_TRAFFIC:
+    printf("No video received from host. Check the host PC's firewall and port forwarding rules.\n");
+    break;
+  case ML_ERROR_NO_VIDEO_FRAME:
+    printf("Your network connection isn't performing well. Reduce your video bitrate setting or try a faster connection.\n");
+    break;
+  case ML_ERROR_UNEXPECTED_EARLY_TERMINATION:
+    printf("The connection was unexpectedly terminated by the host due to a video capture error. Make sure no DRM-protected content is playing on the host.\n");
+    break;
+  case ML_ERROR_PROTECTED_CONTENT:
+    printf("The connection was terminated by the host due to DRM-protected content. Close any DRM-protected content on the host and try again.\n");
+    break;
+  default:
+    printf("Connection terminated with error: %d\n", errorCode);
+    break;
+  }
+
 #ifndef __WIIU__
+  #ifdef HAVE_SDL
+      SDL_Event event;
+      event.type = SDL_QUIT;
+      SDL_PushEvent(&event);
+  #endif
+
   if (main_thread_id != 0)
     pthread_kill(main_thread_id, SIGTERM);
 #else

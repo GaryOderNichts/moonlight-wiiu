@@ -21,6 +21,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <opus_multistream.h>
 #include <pulse/simple.h>
@@ -28,18 +29,19 @@
 
 static OpusMSDecoder* decoder;
 static pa_simple *dev = NULL;
-static short pcmBuffer[FRAME_SIZE * MAX_CHANNEL_COUNT];
+static short* pcmBuffer;
+static int samplesPerFrame;
 static int channelCount;
 
 bool audio_pulse_init(char* audio_device) {
   pa_sample_spec spec = {
     .format = PA_SAMPLE_S16LE,
-    .rate = 44000,
+    .rate = 48000,
     .channels = 2
   };
 
   int error;
-  dev = pa_simple_new(audio_device, "Moonlight Embedded", PA_STREAM_PLAYBACK, NULL, "Streaming", &spec, NULL, NULL, &error);
+  dev = pa_simple_new(NULL, "Moonlight Embedded", PA_STREAM_PLAYBACK, audio_device, "Streaming", &spec, NULL, NULL, &error);
 
   if (dev)
     pa_simple_free(dev);
@@ -49,17 +51,20 @@ bool audio_pulse_init(char* audio_device) {
 
 static int pulse_renderer_init(int audioConfiguration, POPUS_MULTISTREAM_CONFIGURATION opusConfig, void* context, int arFlags) {
   int rc, error;
-  unsigned char alsaMapping[MAX_CHANNEL_COUNT];
+  unsigned char alsaMapping[AUDIO_CONFIGURATION_MAX_CHANNEL_COUNT];
 
   channelCount = opusConfig->channelCount;
+  samplesPerFrame = opusConfig->samplesPerFrame;
+  pcmBuffer = malloc(sizeof(short) * channelCount * samplesPerFrame);
+  if (pcmBuffer == NULL)
+    return -1;
 
-  /* The supplied mapping array has order: FL-FR-C-LFE-RL-RR
-   * ALSA expects the order: FL-FR-RL-RR-C-LFE
+  /* The supplied mapping array has order: FL-FR-C-LFE-RL-RR-SL-SR
+   * ALSA expects the order: FL-FR-RL-RR-C-LFE-SL-SR
    * We need copy the mapping locally and swap the channels around.
    */
-  alsaMapping[0] = opusConfig->mapping[0];
-  alsaMapping[1] = opusConfig->mapping[1];
-  if (opusConfig->channelCount == 6) {
+  memcpy(alsaMapping, opusConfig->mapping, sizeof(alsaMapping));
+  if (opusConfig->channelCount >= 6) {
     alsaMapping[2] = opusConfig->mapping[4];
     alsaMapping[3] = opusConfig->mapping[5];
     alsaMapping[4] = opusConfig->mapping[2];
@@ -74,8 +79,11 @@ static int pulse_renderer_init(int audioConfiguration, POPUS_MULTISTREAM_CONFIGU
     .channels = opusConfig->channelCount
   };
 
+  pa_channel_map map;
+  pa_channel_map_init_auto(&map, opusConfig->channelCount, PA_CHANNEL_MAP_ALSA);
+
   char* audio_device = (char*) context;
-  dev = pa_simple_new(audio_device, "Moonlight Embedded", PA_STREAM_PLAYBACK, NULL, "Streaming", &spec, NULL, NULL, &error);
+  dev = pa_simple_new(NULL, "Moonlight Embedded", PA_STREAM_PLAYBACK, audio_device, "Streaming", &spec, &map, NULL, &error);
 
   if (!dev) {
     printf("Pulseaudio error: %s\n", pa_strerror(error));
@@ -86,7 +94,7 @@ static int pulse_renderer_init(int audioConfiguration, POPUS_MULTISTREAM_CONFIGU
 }
 
 static void pulse_renderer_decode_and_play_sample(char* data, int length) {
-  int decodeLen = opus_multistream_decode(decoder, data, length, pcmBuffer, FRAME_SIZE, 0);
+  int decodeLen = opus_multistream_decode(decoder, data, length, pcmBuffer, samplesPerFrame, 0);
   if (decodeLen > 0) {
     int error;
     int rc = pa_simple_write(dev, pcmBuffer, decodeLen * sizeof(short) * channelCount, &error);
@@ -99,12 +107,23 @@ static void pulse_renderer_decode_and_play_sample(char* data, int length) {
 }
 
 static void pulse_renderer_cleanup() {
-  pa_simple_free(dev);
+  if (decoder != NULL) {
+    opus_multistream_decoder_destroy(decoder);
+    decoder = NULL;
+  }
+  if (dev != NULL) {
+    pa_simple_free(dev);
+    dev = NULL;
+  }
+  if (pcmBuffer != NULL) {
+    free(pcmBuffer);
+    pcmBuffer = NULL;
+  }
 }
 
 AUDIO_RENDERER_CALLBACKS audio_callbacks_pulse = {
   .init = pulse_renderer_init,
   .cleanup = pulse_renderer_cleanup,
   .decodeAndPlaySample = pulse_renderer_decode_and_play_sample,
-  .capabilities = CAPABILITY_DIRECT_SUBMIT,
+  .capabilities = CAPABILITY_DIRECT_SUBMIT | CAPABILITY_SUPPORTS_ARBITRARY_AUDIO_DURATION,
 };

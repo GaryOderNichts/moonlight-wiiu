@@ -88,7 +88,8 @@ static int load_unique_id(const char* keyDirectory) {
 
   FILE *fd = fopen(uniqueFilePath, "r");
   if (fd == NULL) {
-    snprintf(unique_id, UNIQUEID_CHARS+1, "0123456789ABCDEF");
+    snprintf(unique_id,UNIQUEID_CHARS+1,"0123456789ABCDEF");
+
     fd = fopen(uniqueFilePath, "w");
     if (fd == NULL)
       return GS_FAILED;
@@ -292,15 +293,7 @@ static int sign_it(const char *msg, size_t mlen, unsigned char **sig, size_t *sl
   if (ctx == NULL)
     return GS_FAILED;
 
-  const EVP_MD *md = EVP_get_digestbyname("SHA256");
-  if (md == NULL)
-    goto cleanup;
-
-  int rc = EVP_DigestInit_ex(ctx, md, NULL);
-  if (rc != 1)
-    goto cleanup;
-
-  rc = EVP_DigestSignInit(ctx, NULL, md, NULL, pkey);
+  int rc = EVP_DigestSignInit(ctx, NULL, EVP_sha256(), NULL, pkey);
   if (rc != 1)
     goto cleanup;
 
@@ -693,8 +686,6 @@ int gs_start_app(PSERVER_DATA server, STREAM_CONFIGURATION *config, int appId, b
 
   if (!correct_mode && !server->unsupported)
     return GS_NOT_SUPPORTED_MODE;
-  else if (sops && !supported_resolution)
-    return GS_NOT_SUPPORTED_SOPS_RESOLUTION;
 
   if (config->height >= 2160 && !server->supports4K)
     return GS_NOT_SUPPORTED_4K;
@@ -707,7 +698,7 @@ int gs_start_app(PSERVER_DATA server, STREAM_CONFIGURATION *config, int appId, b
   srand(time(NULL));
   char url[4096];
   u_int32_t rikeyid = 0;
-  memset(&rikeyid, config->remoteInputAesIv, 4);
+  memcpy(&rikeyid, config->remoteInputAesIv, 4);
   rikeyid = htonl(rikeyid);
   char rikey_hex[33];
   bytes_to_hex(config->remoteInputAesKey, rikey_hex, 16);
@@ -742,6 +733,14 @@ int gs_start_app(PSERVER_DATA server, STREAM_CONFIGURATION *config, int appId, b
   if (!strcmp(result, "0")) {
     ret = GS_FAILED;
     goto cleanup;
+  }
+
+  free(result);
+  result = NULL;
+
+  if (xml_search(data->memory, data->size, "sessionUrl0", &result) == GS_OK) {
+    server->serverInfo.rtspSessionUrl = result;
+    result = NULL;
   }
 
   cleanup:

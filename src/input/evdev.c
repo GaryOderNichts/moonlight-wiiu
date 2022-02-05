@@ -39,6 +39,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <endian.h>
+#include <math.h>
 
 #if __BYTE_ORDER == __LITTLE_ENDIAN
 #define int16_to_le(val) val
@@ -60,22 +61,26 @@ struct input_device {
   bool is_touchscreen;
   int rotate;
   struct mapping* map;
-  int key_map[KEY_MAX];
-  int abs_map[ABS_MAX];
+  int key_map[KEY_CNT];
+  int abs_map[ABS_CNT];
   int hats_state[3][2];
   int fd;
   char modifiers;
   __s32 mouseDeltaX, mouseDeltaY, mouseScroll;
   __s32 touchDownX, touchDownY, touchX, touchY;
   struct timeval touchDownTime;
+  struct timeval btnDownTime;
   short controllerId;
   int haptic_effect_id;
   int buttonFlags;
-  char leftTrigger, rightTrigger;
+  unsigned char leftTrigger, rightTrigger;
   short leftStickX, leftStickY;
   short rightStickX, rightStickY;
   bool gamepadModified;
+  bool mouseEmulation;
+  pthread_t meThread;
   struct input_abs_parms xParms, yParms, rxParms, ryParms, zParms, rzParms;
+  struct input_abs_parms leftParms, rightParms, upParms, downParms;
 };
 
 #define HAT_UP 1
@@ -91,6 +96,15 @@ static const int hat_constants[3][3] = {{HAT_UP | HAT_LEFT, HAT_UP, HAT_UP | HAT
 #define TOUCH_CLICK_DELAY 100000 // microseconds
 #define TOUCH_RCLICK_TIME 750 // milliseconds
 
+// How long the Start button must be pressed to toggle mouse emulation
+#define MOUSE_EMULATION_LONG_PRESS_TIME 750
+// How long between polling the gamepad to send virtual mouse input
+#define MOUSE_EMULATION_POLLING_INTERVAL 50000
+// Determines how fast the mouse will move each interval
+#define MOUSE_EMULATION_MOTION_MULTIPLIER 3
+// Determines the maximum motion amount before allowing movement
+#define MOUSE_EMULATION_DEADZONE 2
+
 static struct input_device* devices = NULL;
 static int numDevices = 0;
 static int assignedControllerIds = 0;
@@ -102,6 +116,9 @@ static short* currentAbs;
 static bool* currentReverse;
 
 static bool grabbingDevices;
+static bool mouseEmulationEnabled;
+
+static bool waitingToExitOnModifiersUp = false;
 
 int evdev_gamepads = 0;
 
@@ -139,13 +156,19 @@ static bool evdev_init_parms(struct input_device *dev, struct input_abs_parms *p
 static void evdev_remove(int devindex) {
   numDevices--;
 
-  if (devices[devindex].controllerId >= 0)
+  printf("Input device removed: %s (player %d)\n", libevdev_get_name(devices[devindex].dev), devices[devindex].controllerId + 1);
+
+  if (devices[devindex].controllerId >= 0) {
     assignedControllerIds &= ~(1 << devices[devindex].controllerId);
+    LiSendMultiControllerEvent(devices[devindex].controllerId, assignedControllerIds, 0, 0, 0, 0, 0, 0, 0);
+  }
+  if (devices[devindex].mouseEmulation) {
+    devices[devindex].mouseEmulation = false;
+    pthread_join(devices[devindex].meThread, NULL);
+  }
 
   if (devindex != numDevices && numDevices > 0)
     memcpy(&devices[devindex], &devices[numDevices], sizeof(struct input_device));
-
-  fprintf(stderr, "Removed input device\n");
 }
 
 static short evdev_convert_value(struct input_event *ev, struct input_device *dev, struct input_abs_parms *parms, bool reverse) {
@@ -166,18 +189,63 @@ static short evdev_convert_value(struct input_event *ev, struct input_device *de
     return (long long)(ev->value - (ev->value>parms->avg?parms->flat*2:0) - parms->min) * (SHRT_MAX-SHRT_MIN) / (parms->max-parms->min-parms->flat*2) + SHRT_MIN;
 }
 
-static char evdev_convert_value_byte(struct input_event *ev, struct input_device *dev, struct input_abs_parms *parms) {
+static unsigned char evdev_convert_value_byte(struct input_event *ev, struct input_device *dev, struct input_abs_parms *parms, char halfaxis) {
   if (parms->max == 0 && parms->min == 0) {
     fprintf(stderr, "Axis not found: %d\n", ev->code);
     return 0;
   }
 
-  if (abs(ev->value-parms->min)<parms->flat)
-    return 0;
-  else if (ev->value>parms->max)
-    return UCHAR_MAX;
-  else
-    return (ev->value - parms->flat - parms->min) * UCHAR_MAX / (parms->diff - parms->flat);
+  if (halfaxis == 0) {
+    if (abs(ev->value-parms->min)<parms->flat)
+      return 0;
+    else if (ev->value>parms->max)
+      return UCHAR_MAX;
+    else
+      return (ev->value - parms->flat - parms->min) * UCHAR_MAX / (parms->diff - parms->flat);
+  } else {
+    short val = evdev_convert_value(ev, dev, parms, false);
+    if (halfaxis == '-' && val < 0)
+      return -(int)val * UCHAR_MAX / (SHRT_MAX-SHRT_MIN);
+    else if (halfaxis == '+' && val > 0)
+      return (int)val * UCHAR_MAX / (SHRT_MAX-SHRT_MIN);
+    else
+      return 0;
+  }
+}
+
+void *HandleMouseEmulation(void* param)
+{
+  struct input_device* dev = (struct input_device*) param;
+
+  while (dev->mouseEmulation) {
+    usleep(MOUSE_EMULATION_POLLING_INTERVAL);
+
+    short rawX;
+    short rawY;
+
+    // Determine which analog stick is currently receiving the strongest input
+    if ((uint32_t)abs(dev->leftStickX) + abs(dev->leftStickY) > (uint32_t)abs(dev->rightStickX) + abs(dev->rightStickY)) {
+      rawX = dev->leftStickX;
+      rawY = dev->leftStickY;
+    } else {
+      rawX = dev->rightStickX;
+      rawY = dev->rightStickY;
+    }
+
+    float deltaX;
+    float deltaY;
+
+    // Produce a base vector for mouse movement with increased speed as we deviate further from center
+    deltaX = pow((float)rawX / 32767.0f * MOUSE_EMULATION_MOTION_MULTIPLIER, 3);
+    deltaY = pow((float)rawY / 32767.0f * MOUSE_EMULATION_MOTION_MULTIPLIER, 3);
+
+    // Enforce deadzones
+    deltaX = abs(deltaX) > MOUSE_EMULATION_DEADZONE ? deltaX - MOUSE_EMULATION_DEADZONE : 0;
+    deltaY = abs(deltaY) > MOUSE_EMULATION_DEADZONE ? deltaY - MOUSE_EMULATION_DEADZONE : 0;
+
+    if (deltaX != 0 || deltaY != 0)
+      LiSendMouseMoveEvent(deltaX, -deltaY);
+  }
 }
 
 static bool evdev_handle_event(struct input_event *ev, struct input_device *dev) {
@@ -213,6 +281,7 @@ static bool evdev_handle_event(struct input_event *ev, struct input_device *dev)
           if ((assignedControllerIds & (1 << i)) == 0) {
             assignedControllerIds |= (1 << i);
             dev->controllerId = i;
+            printf("Assigned %s as player %d\n", libevdev_get_name(dev->dev), i+1);
             break;
           }
         }
@@ -220,11 +289,15 @@ static bool evdev_handle_event(struct input_event *ev, struct input_device *dev)
         if (dev->controllerId < 0)
           dev->controllerId = 0;
       }
-      LiSendMultiControllerEvent(dev->controllerId, assignedControllerIds, dev->buttonFlags, dev->leftTrigger, dev->rightTrigger, dev->leftStickX, dev->leftStickY, dev->rightStickX, dev->rightStickY);
+      // Send event only if mouse emulation is disabled.
+      if (dev->mouseEmulation == false)
+        LiSendMultiControllerEvent(dev->controllerId, assignedControllerIds, dev->buttonFlags, dev->leftTrigger, dev->rightTrigger, dev->leftStickX, dev->leftStickY, dev->rightStickX, dev->rightStickY);
       dev->gamepadModified = false;
     }
     break;
   case EV_KEY:
+    if (ev->code > KEY_MAX)
+      return true;
     if (ev->code < sizeof(keyCodes)/sizeof(keyCodes[0])) {
       char modifier = 0;
       switch (ev->code) {
@@ -240,6 +313,10 @@ static bool evdev_handle_event(struct input_event *ev, struct input_device *dev)
       case KEY_RIGHTCTRL:
         modifier = MODIFIER_CTRL;
         break;
+      case KEY_LEFTMETA:
+      case KEY_RIGHTMETA:
+        modifier = MODIFIER_META;
+        break;
       }
       if (modifier != 0) {
         if (ev->value)
@@ -248,22 +325,20 @@ static bool evdev_handle_event(struct input_event *ev, struct input_device *dev)
           dev->modifiers &= ~modifier;
       }
 
-      // Quit the stream if all the required quit keys are down
+      // After the quit key combo is pressed, quit once all keys are raised
       if ((dev->modifiers & ACTION_MODIFIERS) == ACTION_MODIFIERS &&
           ev->code == QUIT_KEY && ev->value != 0) {
-
-        short code = 0x80 << 8 | keyCodes[ev->code];
-        LiSendKeyboardEvent(code, KEY_ACTION_DOWN, 0);
-        usleep(1000000);
+        waitingToExitOnModifiersUp = true;
+        return true;
+      } else if (waitingToExitOnModifiersUp && dev->modifiers == 0)
         return false;
-      }
 
       short code = 0x80 << 8 | keyCodes[ev->code];
       LiSendKeyboardEvent(code, ev->value?KEY_ACTION_DOWN:KEY_ACTION_UP, dev->modifiers);
     } else {
       int mouseCode = 0;
       short gamepadCode = 0;
-      int index = ev->code > BTN_MISC && ev->code < (BTN_MISC + KEY_MAX) ? dev->key_map[ev->code - BTN_MISC] : -1;
+      int index = dev->key_map[ev->code];
 
       switch (ev->code) {
       case BTN_LEFT:
@@ -342,10 +417,50 @@ static bool evdev_handle_event(struct input_event *ev, struct input_device *dev)
         LiSendMouseButtonEvent(ev->value?BUTTON_ACTION_PRESS:BUTTON_ACTION_RELEASE, mouseCode);
         gamepadModified = false;
       } else if (gamepadCode != 0) {
-        if (ev->value)
+        if (ev->value) {
           dev->buttonFlags |= gamepadCode;
-        else
+          dev->btnDownTime = ev->time;
+        } else
           dev->buttonFlags &= ~gamepadCode;
+
+        if (mouseEmulationEnabled && gamepadCode == PLAY_FLAG && ev->value == 0) {
+          struct timeval elapsedTime;
+          timersub(&ev->time, &dev->btnDownTime, &elapsedTime);
+          int holdTimeMs = elapsedTime.tv_sec * 1000 + elapsedTime.tv_usec / 1000;
+          if (holdTimeMs >= MOUSE_EMULATION_LONG_PRESS_TIME) {
+            if (dev->mouseEmulation) {
+              dev->mouseEmulation = false;
+              pthread_join(dev->meThread, NULL);
+              dev->meThread = 0;
+              printf("Mouse emulation disabled for controller %d.\n", dev->controllerId);
+            } else {
+              dev->mouseEmulation = true;
+              pthread_create(&dev->meThread, NULL, HandleMouseEmulation, dev);
+              printf("Mouse emulation enabled for controller %d.\n", dev->controllerId);
+            }
+            // clear gamepad state.
+            LiSendMultiControllerEvent(dev->controllerId, assignedControllerIds, 0, 0, 0, 0, 0, 0, 0);
+          }
+        } else if (dev->mouseEmulation) {
+          char action = ev->value ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE;
+          switch (gamepadCode) {
+            case A_FLAG:
+              LiSendMouseButtonEvent(action, BUTTON_LEFT);
+              break;
+            case B_FLAG:
+              LiSendMouseButtonEvent(action, BUTTON_RIGHT);
+              break;
+            case X_FLAG:
+              LiSendMouseButtonEvent(action, BUTTON_MIDDLE);
+              break;
+            case LB_FLAG:
+              LiSendMouseButtonEvent(action, BUTTON_X1);
+              break;
+            case RB_FLAG:
+              LiSendMouseButtonEvent(action, BUTTON_X2);
+              break;
+          }
+        }
       } else if (dev->map != NULL && index == dev->map->btn_lefttrigger)
         dev->leftTrigger = ev->value ? UCHAR_MAX : 0;
       else if (dev->map != NULL && index == dev->map->btn_righttrigger)
@@ -372,6 +487,8 @@ static bool evdev_handle_event(struct input_event *ev, struct input_device *dev)
     }
     break;
   case EV_ABS:
+    if (ev->code > ABS_MAX)
+      return true;
     if (dev->is_touchscreen) {
       switch (ev->code) {
       case ABS_X:
@@ -433,17 +550,57 @@ static bool evdev_handle_event(struct input_event *ev, struct input_device *dev)
         dev->rightStickX = evdev_convert_value(ev, dev, &dev->rxParms, dev->map->reverse_rightx);
       else if (index == dev->map->abs_righty)
         dev->rightStickY = evdev_convert_value(ev, dev, &dev->ryParms, !dev->map->reverse_righty);
-      else if (index == dev->map->abs_lefttrigger)
-        dev->leftTrigger = evdev_convert_value_byte(ev, dev, &dev->zParms);
-      else if (index == dev->map->abs_righttrigger)
-        dev->rightTrigger = evdev_convert_value_byte(ev, dev, &dev->rzParms);
       else
         gamepadModified = false;
+
+      if (index == dev->map->abs_lefttrigger) {
+        dev->leftTrigger = evdev_convert_value_byte(ev, dev, &dev->zParms, dev->map->halfaxis_lefttrigger);
+        gamepadModified = true;
+      }
+      if (index == dev->map->abs_righttrigger) {
+        dev->rightTrigger = evdev_convert_value_byte(ev, dev, &dev->rzParms, dev->map->halfaxis_righttrigger);
+        gamepadModified = true;
+      }
+
+      if (index == dev->map->abs_dpright) {
+        if (evdev_convert_value_byte(ev, dev, &dev->rightParms, dev->map->halfaxis_dpright) > 127)
+          dev->buttonFlags |= RIGHT_FLAG;
+        else
+          dev->buttonFlags &= ~RIGHT_FLAG;
+
+        gamepadModified = true;
+      }
+      if (index == dev->map->abs_dpleft) {
+        if (evdev_convert_value_byte(ev, dev, &dev->leftParms, dev->map->halfaxis_dpleft) > 127)
+          dev->buttonFlags |= LEFT_FLAG;
+        else
+          dev->buttonFlags &= ~LEFT_FLAG;
+
+        gamepadModified = true;
+      }
+      if (index == dev->map->abs_dpup) {
+        if (evdev_convert_value_byte(ev, dev, &dev->upParms, dev->map->halfaxis_dpup) > 127)
+          dev->buttonFlags |= UP_FLAG;
+        else
+          dev->buttonFlags &= ~UP_FLAG;
+
+        gamepadModified = true;
+      }
+      if (index == dev->map->abs_dpdown) {
+        if (evdev_convert_value_byte(ev, dev, &dev->downParms, dev->map->halfaxis_dpdown) > 127)
+          dev->buttonFlags |= DOWN_FLAG;
+        else
+          dev->buttonFlags &= ~DOWN_FLAG;
+
+        gamepadModified = true;
+      }
     }
   }
 
-  if (gamepadModified && (dev->buttonFlags & QUIT_BUTTONS) == QUIT_BUTTONS)
+  if (gamepadModified && (dev->buttonFlags & QUIT_BUTTONS) == QUIT_BUTTONS) {
+    LiSendMultiControllerEvent(dev->controllerId, assignedControllerIds, 0, 0, 0, 0, 0, 0, 0);
     return false;
+  }
 
   dev->gamepadModified |= gamepadModified;
   return true;
@@ -453,7 +610,7 @@ static bool evdev_handle_mapping_event(struct input_event *ev, struct input_devi
   int index, hat_index;
   switch (ev->type) {
   case EV_KEY:
-    index = ev->code > BTN_MISC && ev->code < (BTN_MISC + KEY_MAX) ? dev->key_map[ev->code - BTN_MISC] : -1;
+    index = dev->key_map[ev->code];
     if (currentKey != NULL) {
       if (ev->value)
         *currentKey = index;
@@ -573,13 +730,50 @@ void evdev_create(const char* device, struct mapping* mappings, bool verbose, in
   bool is_mouse = libevdev_has_event_type(evdev, EV_REL) || libevdev_has_event_code(evdev, EV_KEY, BTN_LEFT);
   bool is_touchscreen = libevdev_has_event_code(evdev, EV_KEY, BTN_TOUCH);
 
-  if (mappings == NULL && !(is_keyboard || is_mouse || is_touchscreen)) {
-    fprintf(stderr, "No mapping available for %s (%s) on %s\n", name, str_guid, device);
-    mappings = default_mapping;
+  // This classification logic comes from SDL
+  bool is_accelerometer =
+    ((libevdev_has_event_code(evdev, EV_ABS, ABS_X) &&
+      libevdev_has_event_code(evdev, EV_ABS, ABS_Y) &&
+      libevdev_has_event_code(evdev, EV_ABS, ABS_Z)) ||
+     (libevdev_has_event_code(evdev, EV_ABS, ABS_RX) &&
+      libevdev_has_event_code(evdev, EV_ABS, ABS_RY) &&
+      libevdev_has_event_code(evdev, EV_ABS, ABS_RZ))) &&
+    !libevdev_has_event_type(evdev, EV_KEY);
+  bool is_gamepad =
+    libevdev_has_event_code(evdev, EV_ABS, ABS_X) &&
+    libevdev_has_event_code(evdev, EV_ABS, ABS_Y) &&
+    (libevdev_has_event_code(evdev, EV_KEY, BTN_TRIGGER) ||
+     libevdev_has_event_code(evdev, EV_KEY, BTN_A) ||
+     libevdev_has_event_code(evdev, EV_KEY, BTN_1) ||
+     libevdev_has_event_code(evdev, EV_ABS, ABS_RX) ||
+     libevdev_has_event_code(evdev, EV_ABS, ABS_RY) ||
+     libevdev_has_event_code(evdev, EV_ABS, ABS_RZ) ||
+     libevdev_has_event_code(evdev, EV_ABS, ABS_THROTTLE) ||
+     libevdev_has_event_code(evdev, EV_ABS, ABS_RUDDER) ||
+     libevdev_has_event_code(evdev, EV_ABS, ABS_WHEEL) ||
+     libevdev_has_event_code(evdev, EV_ABS, ABS_GAS) ||
+     libevdev_has_event_code(evdev, EV_ABS, ABS_BRAKE));
+
+  if (is_accelerometer) {
+    if (verbose)
+      printf("Ignoring accelerometer: %s\n", name);
+    libevdev_free(evdev);
+    close(fd);
+    return;
   }
 
-  if (!is_keyboard && !is_mouse && !is_touchscreen)
+  if (is_gamepad) {
     evdev_gamepads++;
+
+    if (mappings == NULL) {
+      fprintf(stderr, "No mapping available for %s (%s) on %s\n", name, str_guid, device);
+      mappings = default_mapping;
+    }
+  } else {
+    if (verbose)
+      printf("Not mapping %s as a gamepad\n", name);
+    mappings = NULL;
+  }
 
   int dev = numDevices;
   numDevices++;
@@ -599,6 +793,7 @@ void evdev_create(const char* device, struct mapping* mappings, bool verbose, in
   devices[dev].fd = fd;
   devices[dev].dev = evdev;
   devices[dev].map = mappings;
+  /* Set unused evdev indices to -2 to avoid aliasing with the default -1 in our mappings */
   memset(&devices[dev].key_map, -2, sizeof(devices[dev].key_map));
   memset(&devices[dev].abs_map, -2, sizeof(devices[dev].abs_map));
   devices[dev].is_keyboard = is_keyboard;
@@ -609,13 +804,14 @@ void evdev_create(const char* device, struct mapping* mappings, bool verbose, in
   devices[dev].touchDownY = TOUCH_UP;
 
   int nbuttons = 0;
+  /* Count joystick buttons first like SDL does */
   for (int i = BTN_JOYSTICK; i < KEY_MAX; ++i) {
     if (libevdev_has_event_code(devices[dev].dev, EV_KEY, i))
-      devices[dev].key_map[i - BTN_MISC] = nbuttons++;
+      devices[dev].key_map[i] = nbuttons++;
   }
-  for (int i = BTN_MISC; i < BTN_JOYSTICK; ++i) {
+  for (int i = 0; i < BTN_JOYSTICK; ++i) {
     if (libevdev_has_event_code(devices[dev].dev, EV_KEY, i))
-      devices[dev].key_map[i - BTN_MISC] = nbuttons++;
+      devices[dev].key_map[i] = nbuttons++;
   }
 
   int naxes = 0;
@@ -637,6 +833,10 @@ void evdev_create(const char* device, struct mapping* mappings, bool verbose, in
     valid &= evdev_init_parms(&devices[dev], &(devices[dev].rxParms), devices[dev].map->abs_rightx);
     valid &= evdev_init_parms(&devices[dev], &(devices[dev].ryParms), devices[dev].map->abs_righty);
     valid &= evdev_init_parms(&devices[dev], &(devices[dev].rzParms), devices[dev].map->abs_righttrigger);
+    valid &= evdev_init_parms(&devices[dev], &(devices[dev].leftParms), devices[dev].map->abs_dpleft);
+    valid &= evdev_init_parms(&devices[dev], &(devices[dev].rightParms), devices[dev].map->abs_dpright);
+    valid &= evdev_init_parms(&devices[dev], &(devices[dev].upParms), devices[dev].map->abs_dpup);
+    valid &= evdev_init_parms(&devices[dev], &(devices[dev].downParms), devices[dev].map->abs_dpdown);
     if (!valid)
       fprintf(stderr, "Mapping for %s (%s) on %s is incorrect\n", name, str_guid, device);
   }
@@ -783,8 +983,9 @@ void evdev_stop() {
   evdev_drain();
 }
 
-void evdev_init() {
+void evdev_init(bool mouse_emulation_enabled) {
   handler = evdev_handle_event;
+  mouseEmulationEnabled = mouse_emulation_enabled;
 }
 
 static struct input_device* evdev_get_input_device(unsigned short controller_id) {

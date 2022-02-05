@@ -28,13 +28,18 @@ struct mapping {
 
   bool reverse_leftx, reverse_lefty;
   bool reverse_rightx, reverse_righty;
+  char halfaxis_lefttrigger, halfaxis_righttrigger;
+  char halfaxis_dpright, halfaxis_dpleft;
+  char halfaxis_dpup, halfaxis_dpdown;
 
+  /* abs_leftx must be the first member of the list of mapping indices! */
   short abs_leftx, abs_lefty;
   short abs_rightx, abs_righty;
 
   short hat_dpright, hat_dpleft, hat_dpup, hat_dpdown;
   short hat_dir_dpright, hat_dir_dpleft, hat_dir_dpup, hat_dir_dpdown;
   short btn_dpup, btn_dpdown, btn_dpleft, btn_dpright;
+  short abs_dpright, abs_dpleft, abs_dpup, abs_dpdown;
 
   short btn_a, btn_x, btn_y, btn_b;
   short btn_back, btn_start, btn_guide;
@@ -44,6 +49,7 @@ struct mapping {
   short abs_lefttrigger, abs_righttrigger;
   short btn_lefttrigger, btn_righttrigger;
 
+  /* next must be the last member after the list of mapping indices! */
   struct mapping* next;
 };
 

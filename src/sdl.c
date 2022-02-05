@@ -50,7 +50,6 @@ void sdl_init(int width, int height, bool fullscreen) {
     exit(1);
   }
 
-  SDL_SetRelativeMouseMode(SDL_TRUE);
   renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
   if (!renderer) {
     printf("SDL_CreateRenderer failed: %s\n", SDL_GetError());
@@ -72,8 +71,11 @@ void sdl_init(int width, int height, bool fullscreen) {
 
 void sdl_loop() {
   SDL_Event event;
+
+  SDL_SetRelativeMouseMode(SDL_TRUE);
+
   while(!done && SDL_WaitEvent(&event)) {
-    switch (sdlinput_handle_event(&event)) {
+    switch (sdlinput_handle_event(window, &event)) {
     case SDL_QUIT_APPLICATION:
       done = true;
       break;
@@ -81,10 +83,12 @@ void sdl_loop() {
       fullscreen_flags ^= SDL_WINDOW_FULLSCREEN;
       SDL_SetWindowFullscreen(window, fullscreen_flags);
     case SDL_MOUSE_GRAB:
+      SDL_ShowCursor(SDL_ENABLE);
       SDL_SetRelativeMouseMode(SDL_TRUE);
       break;
     case SDL_MOUSE_UNGRAB:
       SDL_SetRelativeMouseMode(SDL_FALSE);
+      SDL_ShowCursor(SDL_DISABLE);
       break;
     default:
       if (event.type == SDL_QUIT)

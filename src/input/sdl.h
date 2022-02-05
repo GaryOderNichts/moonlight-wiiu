@@ -76,7 +76,7 @@ static const short keyCodes4[] = {
   0, //SDLK_PRINTSCREEN
   0x91, //SDLK_SCROLLLOCK
   0x13, //SDLK_PAUSE
-  0x9B, //SDLK_INSERT
+  0x2D, //SDLK_INSERT
   0x24, //SDLK_HOME
   0x21, //SDLK_PAGEUP
   0, //Not used
@@ -89,16 +89,16 @@ static const short keyCodes4[] = {
 };
 
 static const short keyCodes5[] = {
-  0x11, //SDLK_LCTRL
-  0x10, //SDLK_LSHIFT
-  0x12, //SDLK_LALT
+  0xA2, //SDLK_LCTRL
+  0xA0, //SDLK_LSHIFT
+  0xA4, //SDLK_LALT
   0x5B, //SDLK_LGUI
-  0x11, //SDLK_LRCTRL
-  0x10, //SDLK_RSHIFT
-  0x12, //SDLK_RALT
+  0xA3, //SDLK_RCTRL
+  0xA1, //SDLK_RSHIFT
+  0xA5, //SDLK_RALT
   0x5C, //SDLK_RGUI
 };
 
 void sdlinput_init(char* mappings);
-int sdlinput_handle_event(SDL_Event* event);
+int sdlinput_handle_event(SDL_Window* window, SDL_Event* event);
 void sdlinput_rumble(unsigned short controller_id, unsigned short low_freq_motor, unsigned short high_freq_motor);

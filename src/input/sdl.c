@@ -26,15 +26,19 @@
 #define QUIT_KEY SDLK_q
 #define QUIT_BUTTONS (PLAY_FLAG|BACK_FLAG|LB_FLAG|RB_FLAG)
 #define FULLSCREEN_KEY SDLK_f
+#define UNGRAB_KEY SDLK_z
 
 typedef struct _GAMEPAD_STATE {
-  char leftTrigger, rightTrigger;
+  unsigned char leftTrigger, rightTrigger;
   short leftStickX, leftStickY;
   short rightStickX, rightStickY;
   int buttons;
   SDL_JoystickID sdl_id;
+  SDL_GameController* controller;
+#if !SDL_VERSION_ATLEAST(2, 0, 9)
   SDL_Haptic* haptic;
   int haptic_effect_id;
+#endif
   short id;
   bool initialized;
 } GAMEPAD_STATE, *PGAMEPAD_STATE;
@@ -46,40 +50,87 @@ static int activeGamepadMask = 0;
 
 int sdl_gamepads = 0;
 
-static PGAMEPAD_STATE get_gamepad(SDL_JoystickID sdl_id) {
+static PGAMEPAD_STATE get_gamepad(SDL_JoystickID sdl_id, bool add) {
+  // See if a gamepad already exists
+  for (int i = 0;i<4;i++) {
+    if (gamepads[i].initialized && gamepads[i].sdl_id == sdl_id)
+        return &gamepads[i];
+  }
+
+  if (!add)
+    return NULL;
+
   for (int i = 0;i<4;i++) {
     if (!gamepads[i].initialized) {
       gamepads[i].sdl_id = sdl_id;
       gamepads[i].id = i;
       gamepads[i].initialized = true;
+
+      // This will cause connection of the virtual controller on the host PC
       activeGamepadMask |= (1 << i);
+      LiSendMultiControllerEvent(i, activeGamepadMask, 0, 0, 0, 0, 0, 0, 0);
+
       return &gamepads[i];
-    } else if (gamepads[i].sdl_id == sdl_id)
-      return &gamepads[i];
+    }
   }
+
   return &gamepads[0];
 }
 
-static void init_gamepad(int joystick_index) {
-  if (SDL_IsGameController(joystick_index)) {
-    sdl_gamepads++;
-    SDL_GameController* controller = SDL_GameControllerOpen(joystick_index);
-    if (!controller) {
-      fprintf(stderr, "Could not open gamecontroller %i: %s\n", joystick_index, SDL_GetError());
-      return;
-    }
+static void add_gamepad(int joystick_index) {
+  SDL_GameController* controller = SDL_GameControllerOpen(joystick_index);
+  if (!controller) {
+    fprintf(stderr, "Could not open gamecontroller %i: %s\n", joystick_index, SDL_GetError());
+    return;
+  }
 
-    SDL_Joystick* joystick = SDL_GameControllerGetJoystick(controller);
-    SDL_Haptic* haptic = SDL_HapticOpenFromJoystick(joystick);
-    if (haptic && (SDL_HapticQuery(haptic) & SDL_HAPTIC_LEFTRIGHT) == 0) {
-      SDL_HapticClose(haptic);
-      haptic = NULL;
-    }
+  SDL_Joystick* joystick = SDL_GameControllerGetJoystick(controller);
+  SDL_JoystickID joystick_id = SDL_JoystickInstanceID(joystick);
 
-    SDL_JoystickID sdl_id = SDL_JoystickInstanceID(joystick);
-    PGAMEPAD_STATE state = get_gamepad(joystick_index);
-    state->haptic = haptic;
-    state->haptic_effect_id = -1;
+  if (get_gamepad(joystick_id, false)) {
+    // Already added
+    SDL_GameControllerClose(controller);
+    return;
+  }
+
+  PGAMEPAD_STATE state = get_gamepad(joystick_id, true);
+  state->controller = controller;
+
+#if !SDL_VERSION_ATLEAST(2, 0, 9)
+  state->haptic = SDL_HapticOpenFromJoystick(joystick);
+  if (haptic && (SDL_HapticQuery(state->haptic) & SDL_HAPTIC_LEFTRIGHT) == 0) {
+    SDL_HapticClose(state->haptic);
+    state->haptic = NULL;
+  }
+  state->haptic_effect_id = -1;
+#endif
+
+  sdl_gamepads++;
+}
+
+static void remove_gamepad(SDL_JoystickID sdl_id) {
+  for (int i = 0;i<4;i++) {
+    if (gamepads[i].initialized && gamepads[i].sdl_id == sdl_id) {
+#if !SDL_VERSION_ATLEAST(2, 0, 9)
+      if (gamepads[i].haptic_effect_id >= 0) {
+        SDL_HapticDestroyEffect(gamepads[i].haptic, gamepads[i].haptic_effect_id);
+      }
+
+      if (gamepads[i].haptic) {
+        SDL_HapticClose(gamepads[i].haptic);
+      }
+#endif
+
+      SDL_GameControllerClose(gamepads[i].controller);
+
+      // This will cause disconnection of the virtual controller on the host PC
+      activeGamepadMask &= ~(1 << i);
+      LiSendMultiControllerEvent(i, activeGamepadMask, 0, 0, 0, 0, 0, 0, 0);
+
+      memset(&gamepads[i], 0, sizeof(*gamepads));
+      sdl_gamepads--;
+      break;
+    }
   }
 }
 
@@ -90,19 +141,33 @@ void sdlinput_init(char* mappings) {
   SDL_InitSubSystem(SDL_INIT_HAPTIC);
   SDL_GameControllerAddMappingsFromFile(mappings);
 
-  for (int i = 0; i < SDL_NumJoysticks(); ++i)
-    init_gamepad(i);
+  // Add game controllers here to ensure an accurate count
+  // goes to the host when starting a new session.
+  for (int i = 0; i < SDL_NumJoysticks(); ++i) {
+    if (SDL_IsGameController(i))
+      add_gamepad(i);
+  }
 }
 
-int sdlinput_handle_event(SDL_Event* event) {
+int sdlinput_handle_event(SDL_Window* window, SDL_Event* event) {
   int button = 0;
   PGAMEPAD_STATE gamepad;
   switch (event->type) {
   case SDL_MOUSEMOTION:
-    LiSendMouseMoveEvent(event->motion.xrel, event->motion.yrel);
+    if (SDL_GetRelativeMouseMode())
+      LiSendMouseMoveEvent(event->motion.xrel, event->motion.yrel);
+    else {
+      int w, h;
+      SDL_GetWindowSize(window, &w, &h);
+      LiSendMousePositionEvent(event->motion.x, event->motion.y, w, h);
+    }
     break;
   case SDL_MOUSEWHEEL:
+#if SDL_VERSION_ATLEAST(2, 0, 18)
+    LiSendHighResScrollEvent((short)(event->wheel.preciseY * 120)); // WHEEL_DELTA
+#else
     LiSendScrollEvent(event->wheel.y);
+#endif
     break;
   case SDL_MOUSEBUTTONUP:
   case SDL_MOUSEBUTTONDOWN:
@@ -127,7 +192,7 @@ int sdlinput_handle_event(SDL_Event* event) {
     if (button != 0)
       LiSendMouseButtonEvent(event->type==SDL_MOUSEBUTTONDOWN?BUTTON_ACTION_PRESS:BUTTON_ACTION_RELEASE, button);
 
-    return SDL_MOUSE_GRAB;
+    return 0;
   case SDL_KEYDOWN:
   case SDL_KEYUP:
     button = event->key.keysym.sym;
@@ -160,6 +225,10 @@ int sdlinput_handle_event(SDL_Event* event) {
     case SDLK_LCTRL:
       modifier = MODIFIER_CTRL;
       break;
+    case SDLK_RGUI:
+    case SDLK_LGUI:
+      modifier = MODIFIER_META;
+      break;
     }
 
     if (modifier != 0) {
@@ -169,36 +238,38 @@ int sdlinput_handle_event(SDL_Event* event) {
         keyboard_modifiers &= ~modifier;
     }
 
+    LiSendKeyboardEvent(0x80 << 8 | button, event->type==SDL_KEYDOWN?KEY_ACTION_DOWN:KEY_ACTION_UP, keyboard_modifiers);
+
     // Quit the stream if all the required quit keys are down
     if ((keyboard_modifiers & ACTION_MODIFIERS) == ACTION_MODIFIERS && event->key.keysym.sym == QUIT_KEY && event->type==SDL_KEYUP)
       return SDL_QUIT_APPLICATION;
     else if ((keyboard_modifiers & ACTION_MODIFIERS) == ACTION_MODIFIERS && event->key.keysym.sym == FULLSCREEN_KEY && event->type==SDL_KEYUP)
       return SDL_TOGGLE_FULLSCREEN;
-    else if ((keyboard_modifiers & ACTION_MODIFIERS) == ACTION_MODIFIERS)
-      return SDL_MOUSE_UNGRAB;
-
-    LiSendKeyboardEvent(0x80 << 8 | button, event->type==SDL_KEYDOWN?KEY_ACTION_DOWN:KEY_ACTION_UP, keyboard_modifiers);
+    else if ((keyboard_modifiers & ACTION_MODIFIERS) == ACTION_MODIFIERS && event->key.keysym.sym == UNGRAB_KEY && event->type==SDL_KEYUP)
+      return SDL_GetRelativeMouseMode() ? SDL_MOUSE_UNGRAB : SDL_MOUSE_GRAB;
     break;
   case SDL_CONTROLLERAXISMOTION:
-    gamepad = get_gamepad(event->caxis.which);
+    gamepad = get_gamepad(event->caxis.which, false);
+    if (!gamepad)
+      return SDL_NOTHING;
     switch (event->caxis.axis) {
     case SDL_CONTROLLER_AXIS_LEFTX:
       gamepad->leftStickX = event->caxis.value;
       break;
     case SDL_CONTROLLER_AXIS_LEFTY:
-      gamepad->leftStickY = -event->caxis.value - 1;
+      gamepad->leftStickY = -SDL_max(event->caxis.value, (short)-32767);
       break;
     case SDL_CONTROLLER_AXIS_RIGHTX:
       gamepad->rightStickX = event->caxis.value;
       break;
     case SDL_CONTROLLER_AXIS_RIGHTY:
-      gamepad->rightStickY = -event->caxis.value - 1;
+      gamepad->rightStickY = -SDL_max(event->caxis.value, (short)-32767);
       break;
     case SDL_CONTROLLER_AXIS_TRIGGERLEFT:
-      gamepad->leftTrigger = (event->caxis.value >> 8) + 127;
+      gamepad->leftTrigger = (unsigned char)(event->caxis.value * 255UL / 32767);
       break;
     case SDL_CONTROLLER_AXIS_TRIGGERRIGHT:
-      gamepad->rightTrigger = (event->caxis.value >> 8) + 127;
+      gamepad->rightTrigger = (unsigned char)(event->caxis.value * 255UL / 32767);
       break;
     default:
       return SDL_NOTHING;
@@ -207,7 +278,9 @@ int sdlinput_handle_event(SDL_Event* event) {
     break;
   case SDL_CONTROLLERBUTTONDOWN:
   case SDL_CONTROLLERBUTTONUP:
-    gamepad = get_gamepad(event->cbutton.which);
+    gamepad = get_gamepad(event->cbutton.which, false);
+    if (!gamepad)
+      return SDL_NOTHING;
     switch (event->cbutton.button) {
     case SDL_CONTROLLER_BUTTON_A:
       button = A_FLAG;
@@ -267,6 +340,12 @@ int sdlinput_handle_event(SDL_Event* event) {
 
     LiSendMultiControllerEvent(gamepad->id, activeGamepadMask, gamepad->buttons, gamepad->leftTrigger, gamepad->rightTrigger, gamepad->leftStickX, gamepad->leftStickY, gamepad->rightStickX, gamepad->rightStickY);
     break;
+  case SDL_CONTROLLERDEVICEADDED:
+    add_gamepad(event->cdevice.which);
+    break;
+  case SDL_CONTROLLERDEVICEREMOVED:
+    remove_gamepad(event->cdevice.which);
+    break;
   }
   return SDL_NOTHING;
 }
@@ -277,6 +356,12 @@ void sdlinput_rumble(unsigned short controller_id, unsigned short low_freq_motor
 
   PGAMEPAD_STATE state = &gamepads[controller_id];
 
+  if (!state->initialized)
+    return;
+
+#if SDL_VERSION_ATLEAST(2, 0, 9)
+  SDL_GameControllerRumble(state->controller, low_freq_motor, high_freq_motor, 30000);
+#else
   SDL_Haptic* haptic = state->haptic;
   if (!haptic)
     return;
@@ -299,4 +384,5 @@ void sdlinput_rumble(unsigned short controller_id, unsigned short low_freq_motor
   state->haptic_effect_id = SDL_HapticNewEffect(haptic, &effect);
   if (state->haptic_effect_id >= 0)
     SDL_HapticRunEffect(haptic, state->haptic_effect_id, 1);
+#endif
 }

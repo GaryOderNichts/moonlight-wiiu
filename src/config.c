@@ -18,6 +18,7 @@
  */
 
 #include "config.h"
+#include "util.h"
 
 #include "input/evdev.h"
 #include "audio/audio.h"
@@ -69,12 +70,12 @@ static struct option long_options[] = {
   {"platform", required_argument, NULL, 'p'},
   {"save", required_argument, NULL, 'q'},
   {"keydir", required_argument, NULL, 'r'},
-  {"remote", no_argument, NULL, 's'},
+  {"remote", required_argument, NULL, 's'},
   {"windowed", no_argument, NULL, 't'},
-  {"surround", no_argument, NULL, 'u'},
+  {"surround", required_argument, NULL, 'u'},
   {"fps", required_argument, NULL, 'v'},
   {"codec", required_argument, NULL, 'x'},
-  {"unsupported", no_argument, NULL, 'y'},
+  {"nounsupported", no_argument, NULL, 'y'},
   {"quitappafter", no_argument, NULL, '1'},
   {"viewonly", no_argument, NULL, '2'},
   {"rotate", required_argument, NULL, '3'},
@@ -84,6 +85,7 @@ static struct option long_options[] = {
   {"disable_gamepad", no_argument, NULL, 'A'},
   {"swap_buttons", no_argument, NULL, 'B'},
 #endif
+  {"nomouseemulation", no_argument, NULL, '4'},
   {0, 0, 0, 0},
 };
 
@@ -211,13 +213,22 @@ static void parse_argument(int c, char* value, PCONFIGURATION config) {
     strcpy(config->key_dir, value);
     break;
   case 's':
-    config->stream.streamingRemotely = 1;
+    if (strcasecmp(value, "auto") == 0)
+      config->stream.streamingRemotely = STREAM_CFG_AUTO;
+    else if (strcasecmp(value, "true") == 0 || strcasecmp(value, "yes") == 0)
+      config->stream.streamingRemotely = STREAM_CFG_REMOTE;
+    else if (strcasecmp(value, "false") == 0 || strcasecmp(value, "no") == 0)
+      config->stream.streamingRemotely = STREAM_CFG_LOCAL;
     break;
+
   case 't':
     config->fullscreen = false;
     break;
   case 'u':
-    config->stream.audioConfiguration = AUDIO_CONFIGURATION_51_SURROUND;
+    if (strcasecmp(value, "5.1") == 0)
+      config->stream.audioConfiguration = AUDIO_CONFIGURATION_51_SURROUND;
+    else if (strcasecmp(value, "7.1") == 0)
+      config->stream.audioConfiguration = AUDIO_CONFIGURATION_71_SURROUND;
     break;
   case 'v':
     config->stream.fps = atoi(value);
@@ -227,11 +238,11 @@ static void parse_argument(int c, char* value, PCONFIGURATION config) {
       config->codec = CODEC_UNSPECIFIED;
     else if (strcasecmp(value, "h264") == 0)
       config->codec = CODEC_H264;
-    if (strcasecmp(value, "h265") == 0 || strcasecmp(value, "hevc") == 0)
+    else if (strcasecmp(value, "h265") == 0 || strcasecmp(value, "hevc") == 0)
       config->codec = CODEC_HEVC;
     break;
   case 'y':
-    config->unsupported = true;
+    config->unsupported = false;
     break;
   case '1':
     config->quitappafter = true;
@@ -256,6 +267,9 @@ static void parse_argument(int c, char* value, PCONFIGURATION config) {
     swap_buttons = true;
     break;
 #endif
+  case '4':
+    config->mouse_emulation = false;
+    break;
   case 1:
     if (config->action == NULL)
       config->action = value;
@@ -345,12 +359,26 @@ void config_parse(int argc, char* argv[], PCONFIGURATION config) {
 
   config->stream.width = 1280;
   config->stream.height = 720;
-  config->stream.fps = -1;
+  config->stream.fps = 60;
   config->stream.bitrate = -1;
-  config->stream.packetSize = 1024;
-  config->stream.streamingRemotely = 0;
+  config->stream.packetSize = 1392;
+  config->stream.streamingRemotely = STREAM_CFG_AUTO;
   config->stream.audioConfiguration = AUDIO_CONFIGURATION_STEREO;
   config->stream.supportsHevc = false;
+  config->stream.encryptionFlags = ENCFLG_AUDIO;
+
+#ifdef __arm__
+  char cpuinfo[4096] = {};
+  if (read_file("/proc/cpuinfo", cpuinfo, sizeof(cpuinfo) - 1) > 0) {
+    // If this is a ARMv6 CPU (like the Pi 1), we'll assume it's not
+    // powerful enough to handle audio encryption. The Pi 1 could
+    // barely handle Opus decoding alone.
+    if (strstr(cpuinfo, "ARMv6")) {
+      config->stream.encryptionFlags = ENCFLG_NONE;
+      printf("Disabling audio encryption on low performance CPU\n");
+    }
+  }
+#endif
 
   config->debug_level = 0;
   config->platform = "auto";
@@ -362,9 +390,10 @@ void config_parse(int argc, char* argv[], PCONFIGURATION config) {
   config->sops = true;
   config->localaudio = false;
   config->fullscreen = true;
-  config->unsupported = false;
+  config->unsupported = true;
   config->quitappafter = false;
   config->viewonly = false;
+  config->mouse_emulation = true;
   config->rotate = 0;
   config->inputsCount = 0;
 
@@ -391,7 +420,7 @@ void config_parse(int argc, char* argv[], PCONFIGURATION config) {
   } else {
     int option_index = 0;
     int c;
-    while ((c = getopt_long_only(argc, argv, "-abc:d:efg:h:i:j:k:lm:no:p:q:r:stuv:w:xy", long_options, &option_index)) != -1) {
+    while ((c = getopt_long_only(argc, argv, "-abc:d:efg:h:i:j:k:lm:no:p:q:r:s:tu:v:w:xy4", long_options, &option_index)) != -1) {
       parse_argument(c, optarg, config);
     }
   }
@@ -414,9 +443,6 @@ void config_parse(int argc, char* argv[], PCONFIGURATION config) {
   if (config_file)
     config_file_parse(config_file, config);
 #endif
-
-  if (config->stream.fps == -1)
-    config->stream.fps = config->stream.height >= 1080 ? 30 : 60;
 
   if (config->stream.bitrate == -1) {
     if (config->stream.height >= 1080 && config->stream.fps >= 60)

@@ -123,9 +123,9 @@ static void stream(PSERVER_DATA server, PCONFIGURATION config, enum platform sys
     if (ret == GS_NOT_SUPPORTED_4K)
       fprintf(stderr, "Server doesn't support 4K\n");
     else if (ret == GS_NOT_SUPPORTED_MODE)
-      fprintf(stderr, "Server doesn't support %dx%d (%d fps) or try --unsupported option\n", config->stream.width, config->stream.height, config->stream.fps);
+      fprintf(stderr, "Server doesn't support %dx%d (%d fps) or remove --nounsupported option\n", config->stream.width, config->stream.height, config->stream.fps);
     else if (ret == GS_NOT_SUPPORTED_SOPS_RESOLUTION)
-      fprintf(stderr, "SOPS isn't supported for the resolution %dx%d, use supported resolution or add --nosops option\n", config->stream.width, config->stream.height);
+      fprintf(stderr, "Optimal Playable Settings isn't supported for the resolution %dx%d, use supported resolution or add --nosops option\n", config->stream.width, config->stream.height);
     else if (ret == GS_ERROR)
       fprintf(stderr, "Gamestream error: %s\n", gs_error);
     else
@@ -142,6 +142,8 @@ static void stream(PSERVER_DATA server, PCONFIGURATION config, enum platform sys
     drFlags |= DISPLAY_FULLSCREEN;
 
   switch (config->rotate) {
+  case 0:
+    break;
   case 90:
     drFlags |= DISPLAY_ROTATE_90;
     break;
@@ -151,6 +153,8 @@ static void stream(PSERVER_DATA server, PCONFIGURATION config, enum platform sys
   case 270:
     drFlags |= DISPLAY_ROTATE_270;
     break;
+  default:
+    printf("Ignoring invalid rotation value: %d\n", config->rotate);
   }
 
   if (config->debug_level > 0) {
@@ -339,23 +343,24 @@ static void help() {
   printf("\t-width <width>\t\tHorizontal resolution (default 1280)\n");
   printf("\t-height <height>\tVertical resolution (default 720)\n");
   #if defined(HAVE_PI) | defined(HAVE_MMAL)
-  printf("\t-rotate <height>\tRotate display: 0/90/180/270 (default 0)\n");
+  printf("\t-rotate <angle>\tRotate display: 0/90/180/270 (default 0)\n");
   #endif
-  printf("\t-fps <fps>\t\tSpecify the fps to use (default -1)\n");
+  printf("\t-fps <fps>\t\tSpecify the fps to use (default 60)\n");
   printf("\t-bitrate <bitrate>\tSpecify the bitrate in Kbps\n");
   printf("\t-packetsize <size>\tSpecify the maximum packetsize in bytes\n");
   printf("\t-codec <codec>\t\tSelect used codec: auto/h264/h265 (default auto)\n");
-  printf("\t-remote\t\t\tEnable remote optimizations\n");
+  printf("\t-remote <yes/no/auto>\t\t\tEnable optimizations for WAN streaming (default auto)\n");
   printf("\t-app <app>\t\tName of app to stream\n");
   printf("\t-nosops\t\t\tDon't allow GFE to modify game settings\n");
   printf("\t-localaudio\t\tPlay audio locally on the host computer\n");
-  printf("\t-surround\t\tStream 5.1 surround sound (requires GFE 2.7)\n");
+  printf("\t-surround <5.1/7.1>\t\tStream 5.1 or 7.1 surround sound\n");
   printf("\t-keydir <directory>\tLoad encryption keys from directory\n");
   printf("\t-mapping <file>\t\tUse <file> as gamepad mappings configuration file\n");
   printf("\t-platform <system>\tSpecify system used for audio, video and input: pi/imx/aml/rk/x11/x11_vdpau/sdl/fake (default auto)\n");
-  printf("\t-unsupported\t\tTry streaming if GFE version or options are unsupported\n");
+  printf("\t-nounsupported\t\tDon't stream if resolution is not officially supported by the server\n");
   printf("\t-quitappafter\t\tSend quit app request to remote after quitting session\n");
   printf("\t-viewonly\t\tDisable all input processing (view-only mode)\n");
+  printf("\t-nomouseemulation\t\tDisable gamepad mouse emulation support (long pressing Start button)\n");
   #if defined(HAVE_SDL) || defined(HAVE_X11)
   printf("\n WM options (SDL and X11 only)\n\n");
   printf("\t-windowed\t\tDisplay screen in a window\n");
@@ -439,7 +444,7 @@ int main(int argc, char* argv[]) {
   }
 
   if (config.debug_level > 0)
-    printf("NVIDIA %s, GFE %s (%s, %s)\n", server.gpuType, server.serverInfo.serverInfoGfeVersion, server.gsVersion, server.serverInfo.serverInfoAppVersion);
+    printf("GPU: %s, GFE: %s (%s, %s)\n", server.gpuType, server.serverInfo.serverInfoGfeVersion, server.gsVersion, server.serverInfo.serverInfoAppVersion);
 
   if (strcmp("list", config.action) == 0) {
     pair_check(&server);
@@ -493,7 +498,7 @@ int main(int argc, char* argv[]) {
         }
 
         udev_init(!inputAdded, mappings, config.debug_level > 0, config.rotate);
-        evdev_init();
+        evdev_init(config.mouse_emulation);
         rumble_handler = evdev_rumble;
         #ifdef HAVE_LIBCEC
         cec_init();
@@ -517,6 +522,7 @@ int main(int argc, char* argv[]) {
     char pin[5];
     sprintf(pin, "%d%d%d%d", (int)random() % 10, (int)random() % 10, (int)random() % 10, (int)random() % 10);
     printf("Please enter the following PIN on the target PC: %s\n", pin);
+    fflush(stdout);
     if (gs_pair(&server, &pin[0]) != GS_OK) {
       fprintf(stderr, "Failed to pair to server: %s\n", gs_error);
     } else {
