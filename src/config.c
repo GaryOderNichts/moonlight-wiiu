@@ -380,6 +380,10 @@ void config_parse(int argc, char* argv[], PCONFIGURATION config) {
   }
 #endif
 
+#ifdef __WIIU__
+  config->stream.encryptionFlags = ENCFLG_NONE;
+#endif
+
   config->debug_level = 0;
   config->platform = "auto";
   config->app = "Steam";

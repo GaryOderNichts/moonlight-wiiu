@@ -50,7 +50,7 @@ static int sdl_renderer_init(int audioConfiguration, POPUS_MULTISTREAM_CONFIGURA
   want.channels = opusConfig->channelCount;
   want.samples = 4096;
 
-  dev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
+  dev = SDL_OpenAudioDevice(NULL, 0, &want, &have, SDL_AUDIO_ALLOW_FORMAT_CHANGE);
   if (dev == 0) {
     printf("Failed to open audio: %s\n", SDL_GetError());
     return -1;
