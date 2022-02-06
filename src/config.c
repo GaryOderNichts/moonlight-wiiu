@@ -35,6 +35,7 @@
 #ifdef __WIIU__
 extern int disable_gamepad;
 extern int swap_buttons;
+extern int autostream;
 
 extern ssize_t getline(char **buf, size_t *bufsiz, FILE *fp);
 
@@ -84,6 +85,7 @@ static struct option long_options[] = {
 #ifdef __WIIU__
   {"disable_gamepad", no_argument, NULL, 'A'},
   {"swap_buttons", no_argument, NULL, 'B'},
+  {"autostream", no_argument, NULL, 'C'},
 #endif
   {"nomouseemulation", no_argument, NULL, '4'},
   {0, 0, 0, 0},
@@ -265,6 +267,9 @@ static void parse_argument(int c, char* value, PCONFIGURATION config) {
     break;
   case 'B':
     swap_buttons = true;
+    break;
+  case 'C':
+    autostream = true;
     break;
 #endif
   case '4':

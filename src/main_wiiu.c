@@ -56,6 +56,8 @@ int state = STATE_INVALID;
 int is_error = 0;
 char message_buffer[1024] = "\0";
 
+int autostream = 0;
+
 static void applist(PSERVER_DATA server) {
   PAPP_LIST list = NULL;
   if (gs_applist(server, &list) != GS_OK) {
@@ -252,6 +254,11 @@ int main(int argc, char* argv[]) {
 
         if (config.debug_level > 0)
           printf("NVIDIA %s, GFE %s (%s, %s)\n", server.gpuType, server.serverInfo.serverInfoGfeVersion, server.gsVersion, server.serverInfo.serverInfoAppVersion);
+
+        if (autostream) {
+          state = STATE_START_STREAM;
+          break;
+        }
 
         state = STATE_CONNECTED;
         break;
