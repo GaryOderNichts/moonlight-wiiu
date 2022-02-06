@@ -4,13 +4,11 @@
 #include <padscore/kpad.h>
 #include <padscore/wpad.h>
 #include <coreinit/time.h>
-#include <unistd.h>
 
 #define millis() OSTicksToMilliseconds(OSGetTime())
 
 int disable_gamepad = 0;
 int swap_buttons = 0;
-int use_home_button = 0;
 
 char lastTouched = 0;
 
@@ -37,7 +35,6 @@ void handleTouch(VPADTouchData touch) {
   if (lastTouched && !touch.touched) {
     if (millis() - touchDownMillis < TAP_MILLIS) {
       LiSendMouseButtonEvent(BUTTON_ACTION_PRESS, BUTTON_LEFT);
-      sleep(0.1);
       LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, BUTTON_LEFT);
     }
   }
@@ -117,7 +114,7 @@ void wiiu_input_update(void) {
     // If the button was just pressed, reset to current time
     if (vpad.trigger & VPAD_BUTTON_HOME) home_pressed[controllerNumber] = millis();
 
-    if (use_home_button && btns & VPAD_BUTTON_HOME && millis() - home_pressed[controllerNumber] > 3000) {
+    if (btns & VPAD_BUTTON_HOME && millis() - home_pressed[controllerNumber] > 3000) {
       state = STATE_STOP_STREAM;
       return;
     }
@@ -168,9 +165,10 @@ void wiiu_input_update(void) {
 #undef CHECKBTN
 
         // If the button was just pressed, reset to current time
-        if (vpad.trigger & WPAD_PRO_BUTTON_HOME) home_pressed[controllerNumber] = millis();
+        if (vpad.trigger & WPAD_PRO_BUTTON_HOME)
+          home_pressed[controllerNumber] = millis();
 
-        if (use_home_button && btns & WPAD_PRO_BUTTON_HOME && millis() - home_pressed[controllerNumber] > 3000) {
+        if (btns & WPAD_PRO_BUTTON_HOME && millis() - home_pressed[controllerNumber] > 3000) {
           state = STATE_STOP_STREAM;
           return;
         }
@@ -212,9 +210,10 @@ void wiiu_input_update(void) {
 #undef CHECKBTN
 
         // If the button was just pressed, reset to current time
-        if (vpad.trigger & WPAD_CLASSIC_BUTTON_HOME) home_pressed[controllerNumber] = millis();
+        if (vpad.trigger & WPAD_CLASSIC_BUTTON_HOME)
+          home_pressed[controllerNumber] = millis();
 
-        if (use_home_button && btns & WPAD_CLASSIC_BUTTON_HOME && millis() - home_pressed[controllerNumber] > 3000) {
+        if (btns & WPAD_CLASSIC_BUTTON_HOME && millis() - home_pressed[controllerNumber] > 3000) {
           state = STATE_STOP_STREAM;
           return;
         }

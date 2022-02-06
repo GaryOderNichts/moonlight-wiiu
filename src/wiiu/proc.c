@@ -4,6 +4,8 @@
 #include "wiiu.h"
 
 #include <coreinit/foreground.h>
+#include <coreinit/title.h>
+#include <coreinit/systeminfo.h>
 #include <proc_ui/procui.h>
 #include <sysapp/launch.h>
 
@@ -13,12 +15,18 @@
 #define MII_MAKER_EUR_TITLE_ID (0x000500101004A200)
 
 static int running = 0;
-
 static int fromHBL = 0;
+static int homeEnabled = 1;
 
-static uint32_t procHomeButtonDenied(void *context)
+static uint32_t procSaveCallback(void* context)
 {
-    if (fromHBL) {
+   OSSavesDone_ReadyToRelease();
+   return 0;
+}
+
+static uint32_t procHomeButtonDenied(void* context)
+{
+    if (fromHBL && homeEnabled) {
         wiiu_proc_stop_running();
     }
 
@@ -37,7 +45,7 @@ void wiiu_proc_init(void)
     }
 
     running = 1;
-    ProcUIInitEx(&OSSavesDone_ReadyToRelease, NULL);
+    ProcUIInitEx(&procSaveCallback, NULL);
 
     wiiu_proc_register_home_callback();
 }
@@ -86,5 +94,15 @@ void wiiu_proc_stop_running(void)
     }
     else {
         SYSLaunchMenu();
+    }
+}
+
+void wiiu_proc_set_home_enabled(int enabled)
+{
+    if (fromHBL) {
+        homeEnabled = enabled;
+    }
+    else {
+        OSEnableHomeButtonMenu(enabled);
     }
 }

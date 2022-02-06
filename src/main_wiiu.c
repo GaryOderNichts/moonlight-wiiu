@@ -316,6 +316,8 @@ int main(int argc, char* argv[]) {
         break;
       }
       case STATE_START_STREAM: {
+        wiiu_proc_set_home_enabled(0);
+
         if (server.paired) {
           enum platform system = WIIU;
           config.stream.supportsHevc = config.codec != CODEC_H264 && (config.codec == CODEC_HEVC || platform_supports_hevc(system));
@@ -350,6 +352,7 @@ int main(int argc, char* argv[]) {
 
         platform_stop(WIIU);
 
+        wiiu_proc_set_home_enabled(1);
         state = STATE_DISCONNECTED;
         break;
       }
