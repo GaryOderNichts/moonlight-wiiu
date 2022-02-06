@@ -141,7 +141,7 @@ COPY --from=opensslbuild /openssl/include/crypto /opt/devkitpro/portlibs/wiiu/in
 RUN wget https://curl.se/download/curl-$curl_ver.tar.gz && mkdir /curl && tar xf curl-$curl_ver.tar.gz -C /curl --strip-components=1
 WORKDIR /curl
 
-ENV CFLAGS "-mcpu=750 -meabi -mhard-float -O2 -ffunction-sections -fdata-sections"
+ENV CFLAGS "-mcpu=750 -meabi -mhard-float -O3 -ffunction-sections -fdata-sections"
 ENV CXXFLAGS "${CFLAGS}"
 ENV CPPFLAGS "-D__WIIU__ -D__WUT__ -I${DEVKITPRO}/wut/include"
 ENV LDFLAGS "-L${DEVKITPRO}/wut/lib"
@@ -177,7 +177,7 @@ ARG expat_ver=2.4.0
 RUN wget https://github.com/libexpat/libexpat/releases/download/R_$expat_tag/expat-$expat_ver.tar.gz && mkdir /expat && tar xf expat-$expat_ver.tar.gz -C /expat --strip-components=1
 WORKDIR /expat
 
-ENV CFLAGS "-mcpu=750 -meabi -mhard-float -O2 -ffunction-sections -fdata-sections"
+ENV CFLAGS "-mcpu=750 -meabi -mhard-float -O3 -ffunction-sections -fdata-sections"
 ENV CXXFLAGS "${CFLAGS}"
 ENV CPPFLAGS "-D__WIIU__ -D__WUT__ -I${DEVKITPRO}/wut/include"
 ENV LDFLAGS "-L${DEVKITPRO}/wut/lib"
@@ -205,7 +205,7 @@ ARG opus_ver=1.1.2
 RUN wget https://github.com/xiph/opus/releases/download/v$opus_ver/opus-$opus_ver.tar.gz && mkdir /opus && tar xf opus-$opus_ver.tar.gz -C /opus --strip-components=1
 WORKDIR /opus
 
-ENV CFLAGS "-mcpu=750 -meabi -mhard-float -O2 -ffunction-sections -fdata-sections"
+ENV CFLAGS "-mcpu=750 -meabi -mhard-float -O3 -ffunction-sections -fdata-sections"
 ENV CXXFLAGS "${CFLAGS}"
 ENV CPPFLAGS "-D__WIIU__ -D__WUT__ -I${DEVKITPRO}/wut/include"
 ENV LDFLAGS "-L${DEVKITPRO}/wut/lib"

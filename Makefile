@@ -41,7 +41,7 @@ SOURCE_FILES	:=
 #-------------------------------------------------------------------------------
 # options for code generation
 #-------------------------------------------------------------------------------
-CFLAGS	:=	-O2 -ffunction-sections -fdata-sections \
+CFLAGS	:=	-O3 -ffunction-sections -fdata-sections \
 			$(MACHDEP)
 
 CFLAGS	+=	$(INCLUDE) -D__WIIU__ -D__WUT__ -DBIGENDIAN
