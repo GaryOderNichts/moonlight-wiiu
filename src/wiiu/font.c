@@ -91,16 +91,6 @@ void Font_Draw(void)
     GX2SetVertexShader(fontShader.vertexShader);
     GX2SetPixelShader(fontShader.pixelShader);
 
-    GX2SetColorControl(GX2_LOGIC_OP_COPY, 0xFF, FALSE, TRUE);
-    GX2SetBlendControl(GX2_RENDER_TARGET_0,
-        GX2_BLEND_MODE_SRC_ALPHA, GX2_BLEND_MODE_INV_SRC_ALPHA,
-        GX2_BLEND_COMBINE_MODE_ADD,
-        TRUE,
-        GX2_BLEND_MODE_ONE, GX2_BLEND_MODE_INV_SRC_ALPHA,
-        GX2_BLEND_COMBINE_MODE_ADD
-    );
-    GX2SetDepthOnlyControl(FALSE, FALSE, GX2_COMPARE_FUNC_ALWAYS);
-
     GX2SetPixelTexture(&fontTexture, 0);
     GX2SetPixelSampler(&fontSampler, 0);
 

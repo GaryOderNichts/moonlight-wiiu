@@ -135,6 +135,7 @@ int main(int argc, char* argv[]) {
   wiiu_proc_init();
 
   WHBGfxInit();
+  wiiu_setup_renderstate();
 
 #ifdef DEBUG
   Debug_Init();

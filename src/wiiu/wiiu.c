@@ -109,16 +109,6 @@ void wiiu_stream_draw(void)
       WHBGfxBeginRenderTV();
       WHBGfxClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
-      GX2SetColorControl(GX2_LOGIC_OP_COPY, 0xFF, FALSE, TRUE);
-      GX2SetBlendControl(GX2_RENDER_TARGET_0,
-        GX2_BLEND_MODE_SRC_ALPHA, GX2_BLEND_MODE_INV_SRC_ALPHA,
-        GX2_BLEND_COMBINE_MODE_ADD,
-        TRUE,
-        GX2_BLEND_MODE_ONE, GX2_BLEND_MODE_INV_SRC_ALPHA,
-        GX2_BLEND_COMBINE_MODE_ADD
-      );
-      GX2SetDepthOnlyControl(FALSE, FALSE, GX2_COMPARE_FUNC_ALWAYS);
-
       GX2SetPixelTexture(&tex->yTex, 0);
       GX2SetPixelTexture(&tex->uvTex, 1);
       GX2SetPixelSampler(&screenSamp, 0);
@@ -137,16 +127,6 @@ void wiiu_stream_draw(void)
       // DRC
       WHBGfxBeginRenderDRC();
       WHBGfxClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-
-      GX2SetColorControl(GX2_LOGIC_OP_COPY, 0xFF, FALSE, TRUE);
-      GX2SetBlendControl(GX2_RENDER_TARGET_0,
-        GX2_BLEND_MODE_SRC_ALPHA, GX2_BLEND_MODE_INV_SRC_ALPHA,
-        GX2_BLEND_COMBINE_MODE_ADD,
-        TRUE,
-        GX2_BLEND_MODE_ONE, GX2_BLEND_MODE_INV_SRC_ALPHA,
-        GX2_BLEND_COMBINE_MODE_ADD
-      );
-      GX2SetDepthOnlyControl(FALSE, FALSE, GX2_COMPARE_FUNC_ALWAYS);
 
       GX2SetPixelTexture(&tex->yTex, 0);
       GX2SetPixelTexture(&tex->uvTex, 1);
@@ -174,7 +154,6 @@ void wiiu_stream_fini(void)
   free(drcAttribs);
 
   WHBGfxFreeShaderGroup(&shaderGroup);
-  WHBGfxShutdown();
 }
 
 void* get_frame(void)
@@ -208,4 +187,28 @@ void add_frame(yuv_texture_t* msg)
   queueMessages[i] = msg;
 
   OSFastMutex_Unlock(&queueMutex);
+}
+
+void wiiu_setup_renderstate(void)
+{
+  WHBGfxBeginRenderTV();
+  GX2SetColorControl(GX2_LOGIC_OP_COPY, 0xFF, FALSE, TRUE);
+  GX2SetBlendControl(GX2_RENDER_TARGET_0,
+    GX2_BLEND_MODE_SRC_ALPHA, GX2_BLEND_MODE_INV_SRC_ALPHA,
+    GX2_BLEND_COMBINE_MODE_ADD,
+    TRUE,
+    GX2_BLEND_MODE_ONE, GX2_BLEND_MODE_INV_SRC_ALPHA,
+    GX2_BLEND_COMBINE_MODE_ADD
+  );
+  GX2SetDepthOnlyControl(FALSE, FALSE, GX2_COMPARE_FUNC_ALWAYS);
+  WHBGfxBeginRenderDRC();
+  GX2SetColorControl(GX2_LOGIC_OP_COPY, 0xFF, FALSE, TRUE);
+  GX2SetBlendControl(GX2_RENDER_TARGET_0,
+    GX2_BLEND_MODE_SRC_ALPHA, GX2_BLEND_MODE_INV_SRC_ALPHA,
+    GX2_BLEND_COMBINE_MODE_ADD,
+    TRUE,
+    GX2_BLEND_MODE_ONE, GX2_BLEND_MODE_INV_SRC_ALPHA,
+    GX2_BLEND_COMBINE_MODE_ADD
+  );
+  GX2SetDepthOnlyControl(FALSE, FALSE, GX2_COMPARE_FUNC_ALWAYS);
 }
