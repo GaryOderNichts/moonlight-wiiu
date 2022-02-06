@@ -150,6 +150,7 @@ static void wiiu_decoder_cleanup() {
 
   for (int i = 0; i < NUM_BUFFERS; i++) {
     free(textures[i].yTex.surface.image);
+    textures[i].yTex.surface.image = NULL;
   }
 }
 

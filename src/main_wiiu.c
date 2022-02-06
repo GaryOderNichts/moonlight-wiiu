@@ -161,7 +161,7 @@ int main(int argc, char* argv[]) {
   if (config.address == NULL) {
     fprintf(stderr, "Specify an IP address\n");
     Font_Clear();
-    Font_Print(8, 58, "Specify an IP address\n");
+    Font_Print(8, 58, "Specify an IP address in the configuration file.\nMake sure to remove the '#' in front of the 'address' line.");
     state = STATE_INVALID;
   }
   else {
@@ -229,19 +229,19 @@ int main(int argc, char* argv[]) {
           break;
         } else if (ret == GS_ERROR) {
           fprintf(stderr, "Gamestream error: %s\n", gs_error);
-          sprintf(message_buffer, "Gamestream error: %s\n", gs_error);
+          sprintf(message_buffer, "Gamestream error:\n%s\n", gs_error);
           is_error = 1;
           state = STATE_DISCONNECTED;
           break;
         } else if (ret == GS_INVALID) {
           fprintf(stderr, "Invalid data received from server: %s\n", gs_error);
-          sprintf(message_buffer, "Invalid data received from server: %s\n", gs_error);
+          sprintf(message_buffer, "Invalid data received from server:\n%s\n", gs_error);
           is_error = 1;
           state = STATE_DISCONNECTED;
           break;
         } else if (ret == GS_UNSUPPORTED_VERSION) {
           fprintf(stderr, "Unsupported version: %s\n", gs_error);
-          sprintf(message_buffer, "Unsupported version: %s\n", gs_error);
+          sprintf(message_buffer, "Unsupported version:\n%s\n", gs_error);
           is_error = 1;
           state = STATE_DISCONNECTED;
           break;
@@ -271,7 +271,7 @@ int main(int argc, char* argv[]) {
 
         Font_Printf(8, 58, "Moonlight Wii U %s (Connected to %s)\n"
                            SCREEN_BAR
-                           "Press \ue000 to stream, Press \ue001 to pair\n", VERSION_STRING, config.address);
+                           "Press \ue000 to stream\nPress \ue001 to pair\n", VERSION_STRING, config.address);
 
         if (is_error) {
           Font_SetColor(255, 0, 0, 255);
@@ -300,11 +300,11 @@ int main(int argc, char* argv[]) {
         Font_Clear();
         Font_SetSize(50);
         Font_SetColor(255, 255, 255, 255);
-        Font_Printf(8, 58, "Please enter the following PIN on the target PC: %s\n", pin);
+        Font_Printf(8, 58, "Please enter the following PIN on the target PC:\n%s\n", pin);
         Font_Draw_TVDRC();
         if (gs_pair(&server, &pin[0]) != GS_OK) {
           fprintf(stderr, "Failed to pair to server: %s\n", gs_error);
-          sprintf(message_buffer, "Failed to pair to server: %s\n", gs_error);
+          sprintf(message_buffer, "Failed to pair to server:\n%s\n", gs_error);
           is_error = 1;
         } else {
           printf("Succesfully paired\n");
@@ -312,17 +312,29 @@ int main(int argc, char* argv[]) {
           is_error = 0;
         }
 
+        // wrong state, make sure we reconnect first
+        if (server.currentGame != 0) {
+          state = STATE_DISCONNECTED;
+          break;
+        }
+
         state = STATE_CONNECTED;
         break;
       }
       case STATE_START_STREAM: {
-        wiiu_proc_set_home_enabled(0);
+        Font_Clear();
+        Font_SetSize(50);
+        Font_SetColor(255, 255, 255, 255);
+
+        Font_Print(8, 58, "Starting stream...");
+        Font_Draw_TVDRC();
 
         if (server.paired) {
           enum platform system = WIIU;
           config.stream.supportsHevc = config.codec != CODEC_H264 && (config.codec == CODEC_HEVC || platform_supports_hevc(system));
 
           if (stream(&server, &config, system) == 0) {
+            wiiu_proc_set_home_enabled(0);
             start_input_thread();
             state = STATE_STREAMING;
             break;

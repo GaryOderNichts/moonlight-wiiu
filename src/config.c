@@ -387,6 +387,7 @@ void config_parse(int argc, char* argv[], PCONFIGURATION config) {
 
 #ifdef __WIIU__
   config->stream.encryptionFlags = ENCFLG_NONE;
+  config->stream.fps = 30;
 #endif
 
   config->debug_level = 0;

@@ -318,7 +318,7 @@ static int thread_running;
 static OSThread inputThread;
 static OSAlarm inputAlarm;
 
-#define INPUT_UPDATE_RATE OSMillisecondsToTicks(10)
+#define INPUT_UPDATE_RATE OSMillisecondsToTicks(16)
 
 static void alarm_callback(OSAlarm* alarm, OSContext* ctx)
 {

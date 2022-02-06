@@ -400,7 +400,7 @@ int gs_pair(PSERVER_DATA server, char* pin) {
   }
 
   if (server->currentGame != 0) {
-    gs_error = "The computer is currently in a game. You must close the game before pairing";
+    gs_error = "The computer is currently in a game.\nYou must close the game before pairing";
     return GS_WRONG_STATE;
   }
 
