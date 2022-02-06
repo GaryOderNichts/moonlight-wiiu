@@ -4,11 +4,13 @@
 #include <padscore/kpad.h>
 #include <padscore/wpad.h>
 #include <coreinit/time.h>
+#include <unistd.h>
 
 #define millis() OSTicksToMilliseconds(OSGetTime())
 
 int disable_gamepad = 0;
 int swap_buttons = 0;
+int use_home_button = 0;
 
 char lastTouched = 0;
 
@@ -72,6 +74,8 @@ void wiiu_input_init(void)
 }
 
 void wiiu_input_update(void) {
+  static uint64_t home_pressed[4] = {0};
+
   short controllerNumber = 0;
   short gamepad_mask = 0;
 
@@ -110,10 +114,13 @@ void wiiu_input_update(void) {
     CHECKBTN(VPAD_BUTTON_HOME,    SPECIAL_FLAG);
 #undef CHECKBTN
 
-    static uint64_t home_pressed = 0;
     // If the button was just pressed, reset to current time
-    if (vpad.trigger & VPAD_BUTTON_HOME) home_pressed = millis();
-    if (btns & VPAD_BUTTON_HOME && millis() - home_pressed > 3000) wiiu_error_exit("Goodbye!");
+    if (vpad.trigger & VPAD_BUTTON_HOME) home_pressed[controllerNumber] = millis();
+
+    if (use_home_button && btns & VPAD_BUTTON_HOME && millis() - home_pressed[controllerNumber] > 3000) {
+      state = STATE_STOP_STREAM;
+      return;
+    }
 
     LiSendMultiControllerEvent(controllerNumber++, gamepad_mask, buttonFlags,
       (vpad.hold & VPAD_BUTTON_ZL) ? 0xFF : 0,
@@ -157,7 +164,16 @@ void wiiu_input_update(void) {
         CHECKBTN(WPAD_PRO_BUTTON_STICK_R, RS_CLK_FLAG);
         CHECKBTN(WPAD_PRO_BUTTON_PLUS,    PLAY_FLAG);
         CHECKBTN(WPAD_PRO_BUTTON_MINUS,   BACK_FLAG);
+        CHECKBTN(WPAD_PRO_BUTTON_HOME,    SPECIAL_FLAG);
 #undef CHECKBTN
+
+        // If the button was just pressed, reset to current time
+        if (vpad.trigger & WPAD_PRO_BUTTON_HOME) home_pressed[controllerNumber] = millis();
+
+        if (use_home_button && btns & WPAD_PRO_BUTTON_HOME && millis() - home_pressed[controllerNumber] > 3000) {
+          state = STATE_STOP_STREAM;
+          return;
+        }
 
         LiSendMultiControllerEvent(controllerNumber++, gamepad_mask, buttonFlags,
           (kpad_data.pro.hold & WPAD_PRO_TRIGGER_ZL) ? 0xFF : 0,
@@ -192,7 +208,16 @@ void wiiu_input_update(void) {
         // CHECKBTN(WPAD_CLASSIC_BUTTON_STICK_R, RS_CLK_FLAG);
         CHECKBTN(WPAD_CLASSIC_BUTTON_PLUS,    PLAY_FLAG);
         CHECKBTN(WPAD_CLASSIC_BUTTON_MINUS,   BACK_FLAG);
+        CHECKBTN(WPAD_CLASSIC_BUTTON_HOME,    SPECIAL_FLAG);
 #undef CHECKBTN
+
+        // If the button was just pressed, reset to current time
+        if (vpad.trigger & WPAD_CLASSIC_BUTTON_HOME) home_pressed[controllerNumber] = millis();
+
+        if (use_home_button && btns & WPAD_CLASSIC_BUTTON_HOME && millis() - home_pressed[controllerNumber] > 3000) {
+          state = STATE_STOP_STREAM;
+          return;
+        }
 
         LiSendMultiControllerEvent(controllerNumber++, gamepad_mask, buttonFlags,
           kpad_data.classic.leftTrigger * 0xFF,

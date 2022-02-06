@@ -6,4 +6,7 @@
 # display
 ./latte-assembler assemble --vsh=display.vsh --psh=display.psh display.gsh
 xxd -i display.gsh > display.h
-sed -i "1s/.*/unsigned char display_gsh[]  __attribute__ ((aligned (512))) = {/" display.h
+
+# font_texture
+./latte-assembler assemble --vsh=font_texture.vsh --psh=font_texture.psh font_texture.gsh
+xxd -i font_texture.gsh > font_texture.h

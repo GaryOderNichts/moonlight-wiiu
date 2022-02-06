@@ -17,15 +17,13 @@
  * along with Moonlight; if not, see <http://www.gnu.org/licenses/>.
  */
 
+#ifndef __WIIU__
 #include "loop.h"
 #include "connection.h"
+#include "configuration.h"
 #include "config.h"
 #include "platform.h"
 #include "sdl.h"
-
-#ifndef __WIIU__
-#include "configuration.h"
-#endif
 
 #include "audio/audio.h"
 #include "video/video.h"
@@ -56,16 +54,6 @@
 #include <netdb.h>
 #include <arpa/inet.h>
 #include <openssl/rand.h>
-
-#ifdef __WIIU__
-#include "wiiu/wiiu.h"
-#include <whb/proc.h>
-#include <coreinit/time.h>
-#include <vpad/input.h>
-#ifdef DEBUG
-void Debug_Init();
-#endif
-#endif
 
 static void applist(PSERVER_DATA server) {
   PAPP_LIST list = NULL;
@@ -100,21 +88,13 @@ static void stream(PSERVER_DATA server, PCONFIGURATION config, enum platform sys
   int appId = get_app_id(server, config->app);
   if (appId<0) {
     fprintf(stderr, "Can't find app %s\n", config->app);
-#ifndef __WIIU__
     exit(-1);
-#else
-    wiiu_error_exit("Can't find app %s\n", config->app);
-#endif
   }
 
   int gamepads = 0;
-  #ifndef __WIIU__
   gamepads += evdev_gamepads;
   #ifdef HAVE_SDL
   gamepads += sdl_gamepads;
-  #endif
-  #else
-  gamepads += wiiu_input_num_controllers();
   #endif
   int gamepad_mask = 0;
   for (int i = 0; i < gamepads && i < 4; i++)
@@ -132,11 +112,7 @@ static void stream(PSERVER_DATA server, PCONFIGURATION config, enum platform sys
       fprintf(stderr, "Gamestream error: %s\n", gs_error);
     else
       fprintf(stderr, "Errorcode starting app: %d\n", ret);
-#ifndef __WIIU__
     exit(-1);
-#else
-    wiiu_error_exit("Errorcode starting app: %d\n", ret);
-#endif
   }
 
   int drFlags = 0;
@@ -164,17 +140,12 @@ static void stream(PSERVER_DATA server, PCONFIGURATION config, enum platform sys
     connection_debug = true;
   }
 
-#ifndef __WIIU__
   if (IS_EMBEDDED(system))
     loop_init();
-#else
-  wiiu_init(config->stream.width, config->stream.height);
-#endif
 
   platform_start(system);
   LiStartConnection(&server->serverInfo, &config->stream, &connection_callbacks, platform_get_video(system), platform_get_audio(system, config->audio_device), NULL, drFlags, config->audio_device, 0);
 
-  #ifndef __WIIU__
   if (IS_EMBEDDED(system)) {
     if (!config->viewonly)
       evdev_start();
@@ -185,9 +156,6 @@ static void stream(PSERVER_DATA server, PCONFIGURATION config, enum platform sys
   #ifdef HAVE_SDL
   else if (system == SDL)
     sdl_loop();
-  #endif
-  #else
-  wiiu_loop();
   #endif
 
   LiStopConnection();
@@ -201,114 +169,6 @@ static void stream(PSERVER_DATA server, PCONFIGURATION config, enum platform sys
   platform_stop(system);
 }
 
-#ifdef __WIIU__
-int main(int argc, char* argv[]) {
-  WHBProcInit();
-  // `WHBProcInit()` will register a `ProcUI` callback for the user pressing
-  // the HOME button, which just quits the program. We want to use it as an
-  // input and have an alternative way to exit, so we clear the callback before
-  // any others are created. This should be the only callback currently registered.
-  ProcUIClearCallbacks();
-
-#ifdef DEBUG
-  Debug_Init();
-  printf("Moonlight Wii U started\n");
-#endif
-
-  wiiu_screen_init();
-  wiiu_input_init();
-
-  CONFIGURATION config;
-  config_parse(argc, argv, &config);
-
-  // TODO
-  config.unsupported = true;
-  config.sops = false;
-
-  if (config.address == NULL) {
-    fprintf(stderr, "Specify an IP address\n");
-    wiiu_error_exit("Specify an IP address\n");
-  }
-
-  char host_config_file[PATH_MAX];
-  snprintf(host_config_file, PATH_MAX, "/vol/external01/moonlight/hosts/%s.conf", config.address);
-  if (access(host_config_file, R_OK) != -1)
-    config_file_parse(host_config_file, &config);
-
-  SERVER_DATA server;
-  printf("Connect to %s...\n", config.address);
-
-  wiiu_screen_clear();
-  wiiu_screen_print(0, 0, "Connect to %s...\n", config.address);
-  wiiu_screen_draw();
-
-  int ret;
-  if ((ret = gs_init(&server, config.address, config.key_dir, config.debug_level, config.unsupported)) == GS_OUT_OF_MEMORY) {
-    fprintf(stderr, "Not enough memory\n");
-    wiiu_error_exit("Not enough memory\n");
-  } else if (ret == GS_ERROR) {
-    fprintf(stderr, "Gamestream error: %s\n", gs_error);
-    wiiu_error_exit("Gamestream error: %s\n", gs_error);
-  } else if (ret == GS_INVALID) {
-    fprintf(stderr, "Invalid data received from server: %s\n", gs_error);
-    wiiu_error_exit("Invalid data received from server: %s\n", gs_error);
-  } else if (ret == GS_UNSUPPORTED_VERSION) {
-    fprintf(stderr, "Unsupported version: %s\n", gs_error);
-    wiiu_error_exit("Unsupported version: %s\n", gs_error);
-  } else if (ret != GS_OK) {
-    fprintf(stderr, "Can't connect to server %s\n", config.address);
-    wiiu_error_exit("Can't connect to server %s\n", config.address);
-  }
-
-  if (config.debug_level > 0)
-    printf("NVIDIA %s, GFE %s (%s, %s)\n", server.gpuType, server.serverInfo.serverInfoGfeVersion, server.gsVersion, server.serverInfo.serverInfoAppVersion);
-
-  wiiu_screen_clear();
-
-  wiiu_screen_print(0, 0, "Moonlight Wii U v1.2 (Connected to %s)", config.address);
-  wiiu_screen_print(0, 1, "=======================================================");
-
-  wiiu_screen_draw();
-
-  while (!server.paired) {
-    char pin[5];
-    sprintf(pin, "%d%d%d%d", (int)random() % 10, (int)random() % 10, (int)random() % 10, (int)random() % 10);
-    printf("Please enter the following PIN on the target PC: %s\n", pin);
-    wiiu_screen_clear();
-    wiiu_screen_print(0, 0, "Please enter the following PIN on the target PC: %s\n", pin);
-    wiiu_screen_draw();
-    if (gs_pair(&server, &pin[0]) != GS_OK) {
-      fprintf(stderr, "Failed to pair to server: %s\n", gs_error);
-      wiiu_screen_clear();
-      wiiu_screen_print(0, 0, "Failed to pair to server: %s\n", gs_error);
-      wiiu_screen_draw();
-      sleep(4);
-    } else {
-      printf("Succesfully paired\n");
-      wiiu_screen_clear();
-      wiiu_screen_print(0, 0, "Succesfully paired\n");
-      wiiu_screen_draw();
-      sleep(3);
-    }
-  }
-
-  enum platform system = platform_check(config.platform);
-  if (config.debug_level > 0)
-    printf("Platform %s\n", platform_name(system));
-
-  if (system == 0) {
-    fprintf(stderr, "Platform '%s' not found\n", config.platform);
-    wiiu_error_exit("Platform '%s' not found\n", config.platform);
-  }
-  config.stream.supportsHevc = config.codec != CODEC_H264 && (config.codec == CODEC_HEVC || platform_supports_hevc(system));
-
-  stream(&server, &config, system);
-
-  wiiu_screen_exit();
-  WHBProcShutdown();
-  return 0;
-}
-#else
 static void help() {
   #ifdef GIT_BRANCH
   printf("Moonlight Embedded %d.%d.%d-%s-%s\n", VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH, GIT_BRANCH, GIT_COMMIT_HASH);
