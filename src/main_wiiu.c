@@ -323,6 +323,7 @@ int main(int argc, char* argv[]) {
           config.stream.supportsHevc = config.codec != CODEC_H264 && (config.codec == CODEC_HEVC || platform_supports_hevc(system));
 
           if (stream(&server, &config, system) == 0) {
+            start_input_thread();
             state = STATE_STREAMING;
             break;
           }
@@ -337,11 +338,11 @@ int main(int argc, char* argv[]) {
         break;
       }
       case STATE_STREAMING: {
-        wiiu_input_update();
         wiiu_stream_draw();
         break;
       }
       case STATE_STOP_STREAM: {
+        stop_input_thread();
         LiStopConnection();
 
         if (config.quitappafter) {

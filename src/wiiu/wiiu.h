@@ -56,6 +56,8 @@ void wiiu_input_init(void);
 void wiiu_input_update(void); // this is only relevant while streaming
 uint32_t wiiu_input_num_controllers(void);
 uint32_t wiiu_input_buttons_triggered(void); // only really used for the menu
+void start_input_thread(void);
+void stop_input_thread(void);
 
 // proc
 void wiiu_proc_init(void);

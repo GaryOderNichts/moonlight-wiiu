@@ -1,9 +1,12 @@
 #include "wiiu.h"
 
+#include <malloc.h>
+
 #include <vpad/input.h>
 #include <padscore/kpad.h>
 #include <padscore/wpad.h>
 #include <coreinit/time.h>
+#include <coreinit/alarm.h>
 
 #define millis() OSTicksToMilliseconds(OSGetTime())
 
@@ -165,7 +168,7 @@ void wiiu_input_update(void) {
 #undef CHECKBTN
 
         // If the button was just pressed, reset to current time
-        if (vpad.trigger & WPAD_PRO_BUTTON_HOME)
+        if (kpad_data.pro.trigger & WPAD_PRO_BUTTON_HOME)
           home_pressed[controllerNumber] = millis();
 
         if (btns & WPAD_PRO_BUTTON_HOME && millis() - home_pressed[controllerNumber] > 3000) {
@@ -210,7 +213,7 @@ void wiiu_input_update(void) {
 #undef CHECKBTN
 
         // If the button was just pressed, reset to current time
-        if (vpad.trigger & WPAD_CLASSIC_BUTTON_HOME)
+        if (kpad_data.classic.trigger & WPAD_CLASSIC_BUTTON_HOME)
           home_pressed[controllerNumber] = millis();
 
         if (btns & WPAD_CLASSIC_BUTTON_HOME && millis() - home_pressed[controllerNumber] > 3000) {
@@ -309,4 +312,56 @@ uint32_t wiiu_input_buttons_triggered(void)
   }
 
   return btns;
+}
+
+static int thread_running;
+static OSThread inputThread;
+static OSAlarm inputAlarm;
+
+#define INPUT_UPDATE_RATE OSMillisecondsToTicks(10)
+
+static void alarm_callback(OSAlarm* alarm, OSContext* ctx)
+{
+  wiiu_input_update();
+}
+
+static int input_thread_proc()
+{
+  OSCreateAlarm(&inputAlarm);
+  OSSetPeriodicAlarm(&inputAlarm, 0, INPUT_UPDATE_RATE, alarm_callback);
+
+  while (thread_running) {
+    OSWaitAlarm(&inputAlarm);
+  }
+}
+
+static void thread_deallocator(OSThread *thread, void *stack)
+{
+  free(stack);
+}
+
+void start_input_thread(void)
+{
+  thread_running = 1;
+  int stack_size = 4 * 1024 * 1024;
+  void* stack_addr = (uint8_t *)memalign(8, stack_size) + stack_size;
+
+  if (!OSCreateThread(&inputThread,
+                      input_thread_proc,
+                      0, NULL,
+                      stack_addr, stack_size,
+                      0x10, OS_THREAD_ATTRIB_AFFINITY_ANY))
+  {
+    return;
+  }
+
+  OSSetThreadDeallocator(&inputThread, thread_deallocator);
+  OSResumeThread(&inputThread);
+}
+
+void stop_input_thread(void)
+{
+  thread_running = 0;
+  OSCancelAlarm(&inputAlarm);
+  OSJoinThread(&inputThread, NULL);
 }
