@@ -15,4 +15,4 @@ jobs:
     - uses: actions/upload-artifact@v2
       with:
        name: moonlight-wiiu
-       path: dist/moonlight-wiiu.zip
+       path: dist/*

@@ -115,7 +115,7 @@ all: $(BUILD)
 dist: all
 	cp moonlight.conf dist/wiiu/apps/moonlight/
 	cp moonlight.rpx dist/wiiu/apps/moonlight/
-	cd dist; zip -FSr moonlight-wiiu.zip wiiu
+#	cd dist; zip -FSr moonlight-wiiu.zip wiiu
 
 $(BUILD):
 	@[ -d $@ ] || mkdir -p $@
