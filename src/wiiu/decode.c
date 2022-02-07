@@ -17,7 +17,9 @@
 #define H264_MEM_REQUIREMENT (0x2200000 + 0x3ff + 0x480000)
 #define H264_MEM_ALIGNMENT 0x400
 #define H264_FRAME_SIZE(w, h) (((w) * (h) * 3) >> 1)
-#define H264_FRAME_PITCH(w) (((w) + 255) & ~255)
+#define H264_FRAME_PITCH(w) (((w) + 0xff) & ~0xff)
+#define H264_FRAME_HEIGHT(h) (((h) + 0xf) & ~0xf)
+#define H264_MAX_FRAME_SIZE H264_FRAME_SIZE(H264_FRAME_PITCH(2800), 1408)
 
 #define DECODER_BUFFER_SIZE 92*1024
 
@@ -33,6 +35,9 @@ static void createYUVTextures(GX2Texture* yPlane, GX2Texture* uvPlane, uint32_t 
 {
   memset(yPlane, 0, sizeof(GX2Texture));
   memset(uvPlane, 0, sizeof(GX2Texture));
+
+  // make sure the height is aligned properly for the output
+  height = H264_FRAME_HEIGHT(height);
 
   // create Y texture
   yPlane->surface.dim = GX2_SURFACE_DIM_TEXTURE_2D;
@@ -155,6 +160,11 @@ static void wiiu_decoder_cleanup() {
 }
 
 static int wiiu_decoder_submit_decode_unit(PDECODE_UNIT decodeUnit) {
+  if (decodeUnit->fullLength > DECODER_BUFFER_SIZE) {
+    fprintf(stderr, "Video decode buffer too small\n");
+    return DR_OK;
+  }
+
   PLENTRY entry = decodeUnit->bufferList;
   int length = 0;
   while (entry != NULL) {
@@ -166,15 +176,15 @@ static int wiiu_decoder_submit_decode_unit(PDECODE_UNIT decodeUnit) {
   int res = H264DECSetBitstream(decoder, decodebuffer, length, 0);
   if (res != 0) {
     printf("h264_wiiu: Error setting bitstream 0x%07X\n", res);
-    return -1;
+    return DR_NEED_IDR;
   }
 
   yuv_texture_t* tex = &textures[currentTexture];
 
   res = H264DECExecute(decoder, tex->yTex.surface.image);
-  if (res != 0xE4) {
+  if ((res & ~0xff) != 0) {
     printf("h264_wiiu: Error decoding frame 0x%07X\n", res);
-    return -1;
+    return DR_NEED_IDR;
   }
 
   nextFrame++;
