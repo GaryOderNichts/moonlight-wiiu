@@ -3,4 +3,8 @@
 *.rpx
 *.elf
 *.gsh
+*.zip
 latte-assembler
+
+# will be auto-copied from 'make dist'
+dist/wiiu/apps/moonlight/moonlight.conf

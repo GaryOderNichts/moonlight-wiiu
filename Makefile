@@ -107,10 +107,15 @@ export INCLUDE	:=	$(foreach dir,$(INCLUDES),-I$(CURDIR)/$(dir)) \
 
 export LIBPATHS	:=	$(foreach dir,$(LIBDIRS),-L$(dir)/lib)
 
-.PHONY: $(BUILD) clean all
+.PHONY: $(BUILD) clean all dist
 
 #-------------------------------------------------------------------------------
 all: $(BUILD)
+
+dist: all
+	cp moonlight.conf dist/wiiu/apps/moonlight/
+	cp moonlight.rpx dist/wiiu/apps/moonlight/
+	cd dist; zip -FSr moonlight-wiiu.zip wiiu
 
 $(BUILD):
 	@[ -d $@ ] || mkdir -p $@

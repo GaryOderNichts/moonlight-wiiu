@@ -11,8 +11,8 @@ jobs:
         submodules: recursive
     - name: build binary
       run: |
-        docker run --rm -v ${PWD}:/project garyodernichts/moonlightbuilder make
-    - uses: actions/upload-artifact@master
+        docker run --rm -v ${PWD}:/project garyodernichts/moonlightbuilder make dist
+    - uses: actions/upload-artifact@v2
       with:
-       name: binary
-       path: "*.rpx"
+       name: moonlight-wiiu
+       path: dist/moonlight-wiiu.zip
