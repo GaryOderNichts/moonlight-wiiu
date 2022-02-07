@@ -12,15 +12,26 @@
 
 int disable_gamepad = 0;
 int swap_buttons = 0;
+int absolute_positioning = 0;
 
-char lastTouched = 0;
+static char lastTouched = 0;
 
-uint16_t last_x = 0;
-uint16_t last_y = 0;
+static uint16_t last_x = 0;
+static uint16_t last_y = 0;
 
 #define TAP_MILLIS 100
 #define DRAG_DISTANCE 10
-uint64_t touchDownMillis = 0;
+static uint64_t touchDownMillis = 0;
+
+#define TOUCH_WIDTH 1280
+#define TOUCH_HEIGHT 720
+
+static int thread_running;
+static OSThread inputThread;
+static OSAlarm inputAlarm;
+
+// ~60 Hz
+#define INPUT_UPDATE_RATE OSMillisecondsToTicks(16)
 
 void handleTouch(VPADTouchData touch) {
   // Just pressed (run this twice to allow touch position to settle)
@@ -43,26 +54,27 @@ void handleTouch(VPADTouchData touch) {
   }
 
   if (touch.touched) {
-    // Holding & dragging screen, not just tapping
-    if (millis() - touchDownMillis > TAP_MILLIS || touchDownMillis == 0) {
-      if (touch.x != last_x || touch.y != last_y) // Don't send extra data if we don't need to
-        LiSendMouseMoveEvent(touch.x - last_x, touch.y - last_y);
-      last_x = touch.x;
-      last_y = touch.y;
-    } else {
-      if (touch.x - last_x < -10 || touch.x - last_x > 10) touchDownMillis=0;
-      if (touch.y - last_y < -10 || touch.y - last_y > 10) touchDownMillis=0;
-      int16_t diff_x = touch.x - last_x;
-      int16_t diff_y = touch.y - last_y;
-      if (diff_x < 0) diff_x = -diff_x;
-      if (diff_y < 0) diff_y = -diff_y;
-      if (diff_x + diff_y > DRAG_DISTANCE) touchDownMillis = 0;
+    if (absolute_positioning) {
+      LiSendMousePositionEvent(touch.x, touch.y, TOUCH_WIDTH, TOUCH_HEIGHT);
+    }
+    else {
+      // Holding & dragging screen, not just tapping
+      if (millis() - touchDownMillis > TAP_MILLIS || touchDownMillis == 0) {
+        if (touch.x != last_x || touch.y != last_y) // Don't send extra data if we don't need to
+          LiSendMouseMoveEvent(touch.x - last_x, touch.y - last_y);
+        last_x = touch.x;
+        last_y = touch.y;
+      } else {
+        if (touch.x - last_x < -10 || touch.x - last_x > 10) touchDownMillis=0;
+        if (touch.y - last_y < -10 || touch.y - last_y > 10) touchDownMillis=0;
+        int16_t diff_x = touch.x - last_x;
+        int16_t diff_y = touch.y - last_y;
+        if (diff_x < 0) diff_x = -diff_x;
+        if (diff_y < 0) diff_y = -diff_y;
+        if (diff_x + diff_y > DRAG_DISTANCE) touchDownMillis = 0;
+      }
     }
   }
-
-  // Absolute positioning:
-  // LiSendMousePositionEvent(touch.x, touch.y, WIDTH, HEIGHT);
-
 
   lastTouched = touch.touched ? lastTouched : 0; // Keep value unless released
 }
@@ -313,12 +325,6 @@ uint32_t wiiu_input_buttons_triggered(void)
 
   return btns;
 }
-
-static int thread_running;
-static OSThread inputThread;
-static OSAlarm inputAlarm;
-
-#define INPUT_UPDATE_RATE OSMillisecondsToTicks(16)
 
 static void alarm_callback(OSAlarm* alarm, OSContext* ctx)
 {
