@@ -15,6 +15,7 @@ int swap_buttons = 0;
 int absolute_positioning = 0;
 
 static char lastTouched = 0;
+static char touched = 0;
 
 static uint16_t last_x = 0;
 static uint16_t last_y = 0;
@@ -34,30 +35,41 @@ static OSAlarm inputAlarm;
 #define INPUT_UPDATE_RATE OSMillisecondsToTicks(16)
 
 void handleTouch(VPADTouchData touch) {
-  // Just pressed (run this twice to allow touch position to settle)
-  if (lastTouched < 2 && touch.touched) {
-    touchDownMillis = millis();
-    last_x = touch.x;
-    last_y = touch.y;
-
-    lastTouched++;
-    return; // We can't do much until we wait for a few hundred milliseconds
-            // since we don't know if it's a tap, a tap-and-hold, or a drag
-  }
-
-  // Just released
-  if (lastTouched && !touch.touched) {
-    if (millis() - touchDownMillis < TAP_MILLIS) {
-      LiSendMouseButtonEvent(BUTTON_ACTION_PRESS, BUTTON_LEFT);
-      LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, BUTTON_LEFT);
-    }
-  }
-
-  if (touch.touched) {
-    if (absolute_positioning) {
+  if (absolute_positioning) {
+    if (touch.touched) {
       LiSendMousePositionEvent(touch.x, touch.y, TOUCH_WIDTH, TOUCH_HEIGHT);
+
+      if (!touched) {
+        LiSendMouseButtonEvent(BUTTON_ACTION_PRESS, BUTTON_LEFT);
+        touched = 1;
+      }
     }
-    else {
+    else if (touched) {
+      LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, BUTTON_LEFT);
+      touched = 0;
+    }
+  }
+  else {
+    // Just pressed (run this twice to allow touch position to settle)
+    if (lastTouched < 2 && touch.touched) {
+      touchDownMillis = millis();
+      last_x = touch.x;
+      last_y = touch.y;
+
+      lastTouched++;
+      return; // We can't do much until we wait for a few hundred milliseconds
+              // since we don't know if it's a tap, a tap-and-hold, or a drag
+    }
+
+    // Just released
+    if (lastTouched && !touch.touched) {
+      if (millis() - touchDownMillis < TAP_MILLIS) {
+        LiSendMouseButtonEvent(BUTTON_ACTION_PRESS, BUTTON_LEFT);
+        LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, BUTTON_LEFT);
+      }
+    }
+
+    if (touch.touched) {
       // Holding & dragging screen, not just tapping
       if (millis() - touchDownMillis > TAP_MILLIS || touchDownMillis == 0) {
         if (touch.x != last_x || touch.y != last_y) // Don't send extra data if we don't need to
@@ -74,9 +86,9 @@ void handleTouch(VPADTouchData touch) {
         if (diff_x + diff_y > DRAG_DISTANCE) touchDownMillis = 0;
       }
     }
-  }
 
-  lastTouched = touch.touched ? lastTouched : 0; // Keep value unless released
+    lastTouched = touch.touched ? lastTouched : 0; // Keep value unless released
+  }
 }
 
 void wiiu_input_init(void)
