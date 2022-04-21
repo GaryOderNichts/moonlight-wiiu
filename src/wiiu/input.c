@@ -260,9 +260,11 @@ uint32_t wiiu_input_num_controllers(void)
   uint32_t numControllers = !disable_gamepad;
 
   WPADExtensionType type;
-  if(WPADProbe(0, &type) == 0) {
-    if (type == WPAD_EXT_PRO_CONTROLLER || type == WPAD_EXT_CLASSIC || type == WPAD_EXT_MPLUS_CLASSIC) {
-      numControllers++;
+  for (int i = 0; i < 4; i++) {
+    if (WPADProbe((WPADChan) i, &type) == 0) {
+      if (type == WPAD_EXT_PRO_CONTROLLER || type == WPAD_EXT_CLASSIC || type == WPAD_EXT_MPLUS_CLASSIC) {
+        numControllers++;
+      }
     }
   }
 
