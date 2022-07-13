@@ -90,6 +90,7 @@ static struct option long_options[] = {
   {"absolute_positioning", no_argument, NULL, 'D'},
 #endif
   {"nomouseemulation", no_argument, NULL, '4'},
+  {"pin", required_argument, NULL, '5'},
   {0, 0, 0, 0},
 };
 
@@ -280,6 +281,9 @@ static void parse_argument(int c, char* value, PCONFIGURATION config) {
   case '4':
     config->mouse_emulation = false;
     break;
+  case '5':
+    config->pin = atoi(value);
+    break;
   case 1:
     if (config->action == NULL)
       config->action = value;
@@ -410,6 +414,8 @@ void config_parse(int argc, char* argv[], PCONFIGURATION config) {
   config->viewonly = false;
   config->mouse_emulation = true;
   config->rotate = 0;
+  config->pin = 0;
+
   config->inputsCount = 0;
 
 #ifndef __WIIU__
@@ -435,7 +441,7 @@ void config_parse(int argc, char* argv[], PCONFIGURATION config) {
   } else {
     int option_index = 0;
     int c;
-    while ((c = getopt_long_only(argc, argv, "-abc:d:efg:h:i:j:k:lm:no:p:q:r:s:tu:v:w:xy4", long_options, &option_index)) != -1) {
+    while ((c = getopt_long_only(argc, argv, "-abc:d:efg:h:i:j:k:lm:no:p:q:r:s:tu:v:w:xy45:", long_options, &option_index)) != -1) {
       parse_argument(c, optarg, config);
     }
   }
