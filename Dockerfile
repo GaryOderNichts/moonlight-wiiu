@@ -1,17 +1,18 @@
 # build wut
-FROM devkitpro/devkitppc:20220128 AS wutbuild
+FROM devkitpro/devkitppc:20220531 AS wutbuild
 
 ENV PATH=$DEVKITPPC/bin:$PATH
 
 WORKDIR /
 RUN git clone https://github.com/devkitPro/wut
 WORKDIR /wut
+RUN git checkout f1b5da996f4c4a58beb3d3ab93aa8e8b9f66e775
 RUN make -j$(nproc)
 RUN make install
 WORKDIR /
 
 # set up builder image
-FROM devkitpro/devkitppc:20220128 AS builder
+FROM devkitpro/devkitppc:20220531 AS builder
 
 RUN apt-get update && apt-get -y install --no-install-recommends wget tar autoconf automake libtool && rm -rf /var/lib/apt/lists/*
 COPY --from=wutbuild /opt/devkitpro/wut /opt/devkitpro/wut
@@ -24,13 +25,17 @@ RUN git clone -b wiiu-2.0.9 --single-branch https://github.com/yawut/SDL
 WORKDIR /SDL
 RUN mkdir build
 WORKDIR /SDL/build
-RUN /opt/devkitpro/portlibs/wiiu/bin/powerpc-eabi-cmake .. -DCMAKE_INSTALL_PREFIX=$DEVKITPRO/portlibs/wiiu
+
+# Need to set CFLAGS manually for now until issues with SDL and wiiu-cmake get resolved
+ENV CFLAGS="-mcpu=750 -meabi -mhard-float -ffunction-sections -fdata-sections -DESPRESSO -D__WIIU__ -D__WUT__ -O3"
+
+RUN /opt/devkitpro/portlibs/wiiu/bin/powerpc-eabi-cmake .. -DCMAKE_INSTALL_PREFIX=$DEVKITPRO/portlibs/wiiu -DCMAKE_BUILD_TYPE=Release
 RUN make -j$(nproc) && make install
 WORKDIR /
 
 # build openssl
 FROM builder AS opensslbuild
-ARG openssl_ver=1.1.1m
+ARG openssl_ver=1.1.1q
 
 RUN wget https://www.openssl.org/source/openssl-$openssl_ver.tar.gz && mkdir /openssl && tar xf openssl-$openssl_ver.tar.gz -C /openssl --strip-components=1
 WORKDIR /openssl
@@ -131,7 +136,7 @@ WORKDIR /
 
 # build curl
 FROM builder as curlbuild
-ARG curl_ver=7.81.0
+ARG curl_ver=7.84.0
 
 # copy in openssl
 COPY --from=opensslbuild /openssl/libcrypto.a /openssl/libssl.a /opt/devkitpro/portlibs/wiiu/lib/
@@ -171,8 +176,8 @@ RUN make -j$(nproc) install
 WORKDIR /
 
 FROM builder as expatbuild
-ARG expat_tag=2_4_0
-ARG expat_ver=2.4.0
+ARG expat_tag=2_4_8
+ARG expat_ver=2.4.8
 
 RUN wget https://github.com/libexpat/libexpat/releases/download/R_$expat_tag/expat-$expat_ver.tar.gz && mkdir /expat && tar xf expat-$expat_ver.tar.gz -C /expat --strip-components=1
 WORKDIR /expat
@@ -225,7 +230,7 @@ CFLAGS="$CFLAGS -Wno-expansion-to-defined"
 RUN make -j$(nproc) && make install
 
 # build final container
-FROM devkitpro/devkitppc:20220128 AS final
+FROM devkitpro/devkitppc:20220531 AS final
 
 # copy in wut
 COPY --from=wutbuild /opt/devkitpro/wut /opt/devkitpro/wut
