@@ -264,7 +264,7 @@ int main(int argc, char* argv[]) {
     }
     config.address[0] = 0;
     printf("Searching for server...\n");
-    gs_discover_server(config.address);
+    gs_discover_server(config.address, &config.port);
     if (config.address[0] == 0) {
       fprintf(stderr, "Autodiscovery failed. Specify an IP address next time.\n");
       exit(-1);
@@ -277,10 +277,10 @@ int main(int argc, char* argv[]) {
     config_file_parse(host_config_file, &config);
 
   SERVER_DATA server;
-  printf("Connect to %s...\n", config.address);
+  printf("Connecting to %s...\n", config.address);
 
   int ret;
-  if ((ret = gs_init(&server, config.address, config.key_dir, config.debug_level, config.unsupported)) == GS_OUT_OF_MEMORY) {
+  if ((ret = gs_init(&server, config.address, config.port, config.key_dir, config.debug_level, config.unsupported)) == GS_OUT_OF_MEMORY) {
     fprintf(stderr, "Not enough memory\n");
     exit(-1);
   } else if (ret == GS_ERROR) {
@@ -346,7 +346,7 @@ int main(int argc, char* argv[]) {
 
         for (int i=0;i<config.inputsCount;i++) {
           if (config.debug_level > 0)
-            printf("Add input %s...\n", config.inputs[i]);
+            printf("Adding input device %s...\n", config.inputs[i]);
 
           evdev_create(config.inputs[i], mappings, config.debug_level > 0, config.rotate);
         }
