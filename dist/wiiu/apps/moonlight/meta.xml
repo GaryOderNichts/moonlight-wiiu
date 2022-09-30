@@ -2,8 +2,8 @@
 <app version="1">
     <name>Moonlight WiiU</name>
     <coder>GaryOderNichts</coder>
-    <version>v1.4</version>
-    <release_date>20220713120000</release_date>
+    <version>v1.5</version>
+    <release_date>20220930120000</release_date>
     <short_description>A Moonlight port for the Nintendo WiiU</short_description>
     <long_description>Moonlight Wii U is a port of Moonlight Embedded, which is an open source implementation of NVIDIA's GameStream, as used by the NVIDIA Shield.
 Moonlight Wii U allows you to stream your full collection of games from your powerful Windows desktop to your Wii U.</long_description>

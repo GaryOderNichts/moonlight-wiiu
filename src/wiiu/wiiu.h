@@ -4,7 +4,7 @@
 #define _GNU_SOURCE
 #endif
 
-#define VERSION_STRING "v1.4"
+#define VERSION_STRING "v1.5"
 
 enum {
   STATE_INVALID,

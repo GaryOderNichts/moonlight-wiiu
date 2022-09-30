@@ -221,7 +221,7 @@ int main(int argc, char* argv[]) {
         Font_Draw_TVDRC();
 
         int ret;
-        if ((ret = gs_init(&server, config.address, config.key_dir, config.debug_level, config.unsupported)) == GS_OUT_OF_MEMORY) {
+        if ((ret = gs_init(&server, config.address, config.port, config.key_dir, config.debug_level, config.unsupported)) == GS_OUT_OF_MEMORY) {
           fprintf(stderr, "Not enough memory\n");
           sprintf(message_buffer, "Not enough memory\n");
           is_error = 1;
