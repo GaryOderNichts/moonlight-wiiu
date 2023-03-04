@@ -10,9 +10,9 @@ Moonlight Wii U allows you to stream your full collection of games from your pow
 * Geforce Experience 2.1.1 or higher
 * A Wii U LAN Adapter is recommended
 
-If your PC isn't supported or you're having performance related issues, try using [sunshine](https://github.com/loki-47-6F-64/sunshine) instead.
+If your PC isn't supported or you're having performance related issues, try using [sunshine](https://github.com/LizardByte/Sunshine) instead.
 
-## Quick Start
+## Quick Start if using GeForce Now
 
 * Grab the latest version from the [releases page](https://github.com/GaryOderNichts/moonlight-wiiu/releases) and extract it to the root of your SD Card
 * Enter the IP of your GFE server in the `moonlight.conf` file located at `sd:/wiiu/apps/moonlight`
@@ -22,6 +22,14 @@ If your PC isn't supported or you're having performance related issues, try usin
 * Accept the pairing confirmation on your PC
 * Connect to the GFE Server with Moonlight Wii U
 * Play games!
+
+## Quick Start For Sunshine users
+
+ * Grab the latest version of sunshine [sunshine](https://github.com/LizardByte/Sunshine)
+ * After installing, ensure host computer has a STATIC IP ADDRESS,
+ * Rename Steam Big Picture in sunshine to Steam
+    -Navigate to applications, then edit Steam Big Picture, rename it to `Steam`, or do the same for Desktop, edit, rename to `Steam` (do this as Moonlight will try to connect to an app named `Steam` you can change this in the conf file, but its recommended to do it this way)
+ * in the `moonlight.conf` file edit in your ip address of the host computer and REMOVE the # in front of it, any settings you want changed the # must be removed for the setting to take place
 
 ## Configuration
 
