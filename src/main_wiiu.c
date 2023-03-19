@@ -295,7 +295,7 @@ int main(int argc, char* argv[]) {
       }
       case STATE_PAIRING: {
         char pin[5];
-        sprintf(pin, "%d%d%d%d", (int)random() % 10, (int)random() % 10, (int)random() % 10, (int)random() % 10);
+        sprintf(pin, "%d%d%d%d", (unsigned)random() % 10, (unsigned)random() % 10, (unsigned)random() % 10, (unsigned)random() % 10);
         printf("Please enter the following PIN on the target PC: %s\n", pin);
         Font_Clear();
         Font_SetSize(50);
@@ -332,6 +332,13 @@ int main(int argc, char* argv[]) {
         if (server.paired) {
           enum platform system = WIIU;
           config.stream.supportsHevc = config.codec != CODEC_H264 && (config.codec == CODEC_HEVC || platform_supports_hevc(system));
+          if (config.stream.enableHdr && !config.stream.supportsHevc) {
+            printf("HDR streaming requires HEVC codec\n");
+            sprintf(message_buffer, "HDR streaming requires HEVC codec\n");
+            is_error = 1;
+            state = STATE_CONNECTED;
+            break;
+          }
 
           if (stream(&server, &config, system) == 0) {
             wiiu_proc_set_home_enabled(0);

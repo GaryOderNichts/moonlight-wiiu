@@ -66,7 +66,7 @@ struct input_device {
   int hats_state[3][2];
   int fd;
   char modifiers;
-  __s32 mouseDeltaX, mouseDeltaY, mouseScroll;
+  __s32 mouseDeltaX, mouseDeltaY, mouseVScroll, mouseHScroll;
   __s32 touchDownX, touchDownY, touchX, touchY;
   struct timeval touchDownTime;
   struct timeval btnDownTime;
@@ -240,12 +240,14 @@ void *HandleMouseEmulation(void* param)
     deltaY = pow((float)rawY / 32767.0f * MOUSE_EMULATION_MOTION_MULTIPLIER, 3);
 
     // Enforce deadzones
-    deltaX = abs(deltaX) > MOUSE_EMULATION_DEADZONE ? deltaX - MOUSE_EMULATION_DEADZONE : 0;
-    deltaY = abs(deltaY) > MOUSE_EMULATION_DEADZONE ? deltaY - MOUSE_EMULATION_DEADZONE : 0;
+    deltaX = fabs(deltaX) > MOUSE_EMULATION_DEADZONE ? deltaX - MOUSE_EMULATION_DEADZONE : 0;
+    deltaY = fabs(deltaY) > MOUSE_EMULATION_DEADZONE ? deltaY - MOUSE_EMULATION_DEADZONE : 0;
 
     if (deltaX != 0 || deltaY != 0)
       LiSendMouseMoveEvent(deltaX, -deltaY);
   }
+
+  return NULL;
 }
 
 static bool evdev_handle_event(struct input_event *ev, struct input_device *dev) {
@@ -271,9 +273,13 @@ static bool evdev_handle_event(struct input_event *ev, struct input_device *dev)
       dev->mouseDeltaX = 0;
       dev->mouseDeltaY = 0;
     }
-    if (dev->mouseScroll != 0) {
-      LiSendScrollEvent(dev->mouseScroll);
-      dev->mouseScroll = 0;
+    if (dev->mouseVScroll != 0) {
+      LiSendScrollEvent(dev->mouseVScroll);
+      dev->mouseVScroll = 0;
+    }
+    if (dev->mouseHScroll != 0) {
+      LiSendHScrollEvent(dev->mouseHScroll);
+      dev->mouseHScroll = 0;
     }
     if (dev->gamepadModified) {
       if (dev->controllerId < 0) {
@@ -481,8 +487,11 @@ static bool evdev_handle_event(struct input_event *ev, struct input_device *dev)
       case REL_Y:
         dev->mouseDeltaY = ev->value;
         break;
+      case REL_HWHEEL:
+        dev->mouseHScroll = ev->value;
+        break;
       case REL_WHEEL:
-        dev->mouseScroll = ev->value;
+        dev->mouseVScroll = ev->value;
         break;
     }
     break;
@@ -923,7 +932,7 @@ void evdev_map(char* device) {
     buf += sprintf(buf, "%02x", ((unsigned char*) guid)[i]);
 
   struct mapping map;
-  strncpy(map.name, libevdev_get_name(evdev), sizeof(map.name));
+  strncpy(map.name, name, sizeof(map.name));
   strncpy(map.guid, str_guid, sizeof(map.guid));
 
   libevdev_free(evdev);

@@ -57,8 +57,8 @@ static int alsa_renderer_init(int audioConfiguration, POPUS_MULTISTREAM_CONFIGUR
 
   snd_pcm_hw_params_t *hw_params;
   snd_pcm_sw_params_t *sw_params;
-  snd_pcm_uframes_t period_size = samplesPerFrame * FRAME_BUFFER;
-  snd_pcm_uframes_t buffer_size = 2 * period_size;
+  snd_pcm_uframes_t period_size = (opusConfig->sampleRate * 20) / 1000; // 20 ms period
+  snd_pcm_uframes_t buffer_size = 3 * period_size; // 60 ms buffer
   unsigned int sampleRate = opusConfig->sampleRate;
 
   char* audio_device = (char*) context;
@@ -84,7 +84,7 @@ static int alsa_renderer_init(int audioConfiguration, POPUS_MULTISTREAM_CONFIGUR
   CHECK_RETURN(snd_pcm_sw_params_malloc(&sw_params));
   CHECK_RETURN(snd_pcm_sw_params_current(handle, sw_params));
   CHECK_RETURN(snd_pcm_sw_params_set_avail_min(handle, sw_params, period_size));
-  CHECK_RETURN(snd_pcm_sw_params_set_start_threshold(handle, sw_params, 1));
+  CHECK_RETURN(snd_pcm_sw_params_set_start_threshold(handle, sw_params, period_size));
   CHECK_RETURN(snd_pcm_sw_params(handle, sw_params));
   snd_pcm_sw_params_free(sw_params);
 
@@ -115,14 +115,17 @@ static void alsa_renderer_decode_and_play_sample(char* data, int length) {
   int decodeLen = opus_multistream_decode(decoder, data, length, pcmBuffer, samplesPerFrame, 0);
   if (decodeLen > 0) {
     int rc = snd_pcm_writei(handle, pcmBuffer, decodeLen);
-    if (rc == -EPIPE)
-      snd_pcm_recover(handle, rc, 1);
+    if (rc < 0) {
+      rc = snd_pcm_recover(handle, rc, 0);
+      if (rc == 0)
+        rc = snd_pcm_writei(handle, pcmBuffer, decodeLen);
+    }
 
     if (rc<0)
       printf("Alsa error from writei: %d\n", rc);
     else if (decodeLen != rc)
       printf("Alsa shortm write, write %d frames\n", rc);
-  } else {
+  } else if (decodeLen < 0) {
     printf("Opus error from decode: %d\n", decodeLen);
   }
 }

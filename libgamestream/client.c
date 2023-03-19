@@ -94,16 +94,16 @@ static int load_unique_id(const char* keyDirectory) {
   snprintf(uniqueFilePath, PATH_MAX, "%s/%s", keyDirectory, UNIQUE_FILE_NAME);
 
   FILE *fd = fopen(uniqueFilePath, "r");
-  if (fd == NULL) {
+  if (fd == NULL || fread(unique_id, UNIQUEID_CHARS, 1, fd) != UNIQUEID_CHARS) {
     snprintf(unique_id,UNIQUEID_CHARS+1,"0123456789ABCDEF");
 
+    if (fd)
+      fclose(fd);
     fd = fopen(uniqueFilePath, "w");
     if (fd == NULL)
       return GS_FAILED;
 
     fwrite(unique_id, UNIQUEID_CHARS, 1, fd);
-  } else {
-    fread(unique_id, UNIQUEID_CHARS, 1, fd);
   }
   fclose(fd);
   unique_id[UNIQUEID_CHARS] = 0;
@@ -237,6 +237,7 @@ static int load_serverinfo(PSERVER_DATA server, bool https) {
   server->currentGame = currentGameText == NULL ? 0 : atoi(currentGameText);
   server->supports4K = serverCodecModeSupportText != NULL;
   server->serverMajorVersion = atoi(server->serverInfo.serverInfoAppVersion);
+  server->isNvidiaSoftware = strstr(stateText, "MJOLNIR") != NULL;
 
   server->httpsPort = atoi(httpsPortText);
   if (!server->httpsPort)
@@ -440,17 +441,12 @@ static void hex2bin(const char* in, size_t len, unsigned char* out) {
 int gs_pair(PSERVER_DATA server, char* pin) {
   int ret = GS_OK;
   char* result = NULL;
-  char url[4096];
+  char url[5120];
   uuid_t uuid;
   char uuid_str[UUID_STRLEN];
 
   if (server->paired) {
     gs_error = "Already paired";
-    return GS_WRONG_STATE;
-  }
-
-  if (server->currentGame != 0) {
-    gs_error = "The computer is currently in a game.\nYou must close the game before pairing";
     return GS_WRONG_STATE;
   }
 
@@ -696,6 +692,13 @@ int gs_pair(PSERVER_DATA server, char* pin) {
 
   http_free_data(data);
 
+  // If we failed when attempting to pair with a game running, that's likely the issue.
+  // Sunshine supports pairing with an active session, but GFE does not.
+  if (ret != GS_OK && server->currentGame != 0) {
+    gs_error = "The computer is currently in a game. You must close the game before pairing.";
+    ret = GS_WRONG_STATE;
+  }
+
   return ret;
 }
 
@@ -730,10 +733,8 @@ int gs_start_app(PSERVER_DATA server, STREAM_CONFIGURATION *config, int appId, b
 
   PDISPLAY_MODE mode = server->modes;
   bool correct_mode = false;
-  bool supported_resolution = false;
   while (mode != NULL) {
     if (mode->width == config->width && mode->height == config->height) {
-      supported_resolution = true;
       if (mode->refresh == config->fps)
         correct_mode = true;
     }
@@ -762,19 +763,18 @@ int gs_start_app(PSERVER_DATA server, STREAM_CONFIGURATION *config, int appId, b
   if (data == NULL)
     return GS_OUT_OF_MEMORY;
 
+  // Using an FPS value over 60 causes SOPS to default to 720p60,
+  // so force it to 0 to ensure the correct resolution is set. We
+  // used to use 60 here but that locked the frame rate to 60 FPS
+  // on GFE 3.20.3.
+  int fps = (server->isNvidiaSoftware && config->fps > 60) ? 0 : config->fps;
+
   uuid_generate_random(uuid);
   uuid_unparse(uuid, uuid_str);
   int surround_info = SURROUNDAUDIOINFO_FROM_AUDIO_CONFIGURATION(config->audioConfiguration);
-  if (server->currentGame == 0) {
-    // Using an FPS value over 60 causes SOPS to default to 720p60,
-    // so force it to 0 to ensure the correct resolution is set. We
-    // used to use 60 here but that locked the frame rate to 60 FPS
-    // on GFE 3.20.3.
-    int fps = config->fps > 60 ? 0 : config->fps;
-    snprintf(url, sizeof(url), "https://%s:%u/launch?uniqueid=%s&uuid=%s&appid=%d&mode=%dx%dx%d&additionalStates=1&sops=%d&rikey=%s&rikeyid=%d&localAudioPlayMode=%d&surroundAudioInfo=%d&remoteControllersBitmap=%d&gcmap=%d", server->serverInfo.address, server->httpsPort, unique_id, uuid_str, appId, config->width, config->height, fps, sops, rikey_hex, rikeyid, localaudio, surround_info, gamepad_mask, gamepad_mask);
-  } else
-    snprintf(url, sizeof(url), "https://%s:%u/resume?uniqueid=%s&uuid=%s&rikey=%s&rikeyid=%d&surroundAudioInfo=%d", server->serverInfo.address, server->httpsPort, unique_id, uuid_str, rikey_hex, rikeyid, surround_info);
-
+  snprintf(url, sizeof(url), "https://%s:%u/%s?uniqueid=%s&uuid=%s&appid=%d&mode=%dx%dx%d&additionalStates=1&sops=%d&rikey=%s&rikeyid=%d&localAudioPlayMode=%d&surroundAudioInfo=%d&remoteControllersBitmap=%d&gcmap=%d%s",
+           server->serverInfo.address, server->httpsPort, server->currentGame ? "resume" : "launch", unique_id, uuid_str, appId, config->width, config->height, fps, sops, rikey_hex, rikeyid, localaudio, surround_info, gamepad_mask, gamepad_mask,
+           config->enableHdr ? "&hdrMode=1&clientHdrCapVersion=0&clientHdrCapSupportedFlagsInUint32=0&clientHdrCapMetaDataId=NV_STATIC_METADATA_TYPE_1&clientHdrCapDisplayData=0x0x0x0x0x0x0x0x0x0x0" : "");
   if ((ret = http_request(url, data)) == GS_OK)
     server->currentGame = appId;
   else
@@ -782,7 +782,8 @@ int gs_start_app(PSERVER_DATA server, STREAM_CONFIGURATION *config, int appId, b
 
   if ((ret = xml_status(data->memory, data->size) != GS_OK))
     goto cleanup;
-  else if ((ret = xml_search(data->memory, data->size, "gamesession", &result)) != GS_OK)
+  else if ((ret = xml_search(data->memory, data->size, "gamesession", &result)) != GS_OK &&
+           (ret = xml_search(data->memory, data->size, "resume", &result)) != GS_OK)
     goto cleanup;
 
   if (!strcmp(result, "0")) {

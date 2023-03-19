@@ -41,13 +41,11 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <ilclient.h>
 #include <bcm_host.h>
 
-#define MAX_DECODE_UNIT_SIZE 262144
-
 static TUNNEL_T tunnel[2];
 static COMPONENT_T *list[3];
 static ILCLIENT_T *client;
 
-static COMPONENT_T *video_decode = NULL, *video_scheduler = NULL, *video_render = NULL;
+static COMPONENT_T *video_decode = NULL, *video_render = NULL;
 
 static int port_settings_changed;
 static int first_packet;
@@ -62,8 +60,6 @@ static int decoder_renderer_setup(int videoFormat, int width, int height, int re
   gs_sps_init(width, height);
 
   OMX_VIDEO_PARAM_PORTFORMATTYPE format;
-  OMX_TIME_CONFIG_CLOCKSTATETYPE cstate;
-  COMPONENT_T *clock = NULL;
 
   memset(list, 0, sizeof(list));
   memset(tunnel, 0, sizeof(tunnel));
@@ -132,13 +128,6 @@ static int decoder_renderer_setup(int videoFormat, int width, int height, int re
   latencyTarget.nInterFactor = 500;
   latencyTarget.nAdjCap = 20;
 
-  OMX_CONFIG_DISPLAYREGIONTYPE displayRegion;
-  displayRegion.nSize = sizeof(OMX_PARAM_PORTDEFINITIONTYPE);
-  displayRegion.nVersion.nVersion = OMX_VERSION;
-  displayRegion.nPortIndex = 90;
-  displayRegion.fullscreen = OMX_TRUE;
-  displayRegion.mode = OMX_DISPLAY_SET_FULLSCREEN;
-
   if(OMX_SetParameter(ILC_GET_HANDLE(video_render), OMX_IndexConfigLatencyTarget, &latencyTarget) != OMX_ErrorNone) {
     fprintf(stderr, "Failed to set video render parameters\n");
     exit(EXIT_FAILURE);
@@ -179,7 +168,7 @@ static int decoder_renderer_setup(int videoFormat, int width, int height, int re
   }
 
   // Increase the buffer size to fit the largest possible frame
-  port.nBufferSize = MAX_DECODE_UNIT_SIZE;
+  port.nBufferSize = INITIAL_DECODER_BUFFER_SIZE;
 
   if(OMX_SetParameter(ILC_GET_HANDLE(video_decode), OMX_IndexParamPortDefinition, &port) == OMX_ErrorNone &&
      ilclient_enable_port_buffers(video_decode, 130, NULL, NULL, NULL) == 0) {
@@ -197,8 +186,6 @@ static int decoder_renderer_setup(int videoFormat, int width, int height, int re
 }
 
 static void decoder_renderer_cleanup() {
-  int status = 0;
-
   OMX_BUFFERHEADERTYPE *buf;
   if((buf = ilclient_get_input_buffer(video_decode, 130, 1)) == NULL){
     fprintf(stderr, "Can't get video buffer\n");

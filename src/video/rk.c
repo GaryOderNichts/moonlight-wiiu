@@ -18,7 +18,8 @@
  * along with Moonlight; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <Limelight.h>
+#include "video.h"
+#include "../util.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,28 +36,70 @@
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 #include <libdrm/drm_fourcc.h>
+#include <linux/videodev2.h>
 
 #include <rockchip/rk_mpi.h>
 
-#define READ_BUF_SIZE 0x00100000
 #define MAX_FRAMES 16
 #define RK_H264 7
 #define RK_H265 16777220
 
-#ifndef DRM_FORMAT_NV12_10
-#define DRM_FORMAT_NV12_10 fourcc_code('N', 'A', '1', '2')
+// Vendor-defined 10-bit format code used prior to 5.10
+#ifndef DRM_FORMAT_NA12
+#define DRM_FORMAT_NA12 fourcc_code('N', 'A', '1', '2')
 #endif
 
+// Upstreamed 10-bit format code used on 5.10+ kernels
+#ifndef DRM_FORMAT_NV15
+#define DRM_FORMAT_NV15 fourcc_code('N', 'V', '1', '5')
+#endif
+
+// HDR structs copied from linux include/linux/hdmi.h for older libdrm versions
+struct rk_hdr_metadata_infoframe
+{
+    uint8_t eotf;
+    uint8_t metadata_type;
+
+    struct
+    {
+        uint16_t x, y;
+    } display_primaries[3];
+
+    struct
+    {
+        uint16_t x, y;
+    } white_point;
+
+    uint16_t max_display_mastering_luminance;
+    uint16_t min_display_mastering_luminance;
+
+    uint16_t max_cll;
+    uint16_t max_fall;
+};
+
+struct rk_hdr_output_metadata
+{
+    uint32_t metadata_type;
+
+    union {
+        struct rk_hdr_metadata_infoframe hdmi_metadata_type1;
+    };
+};
+
 void *pkt_buf = NULL;
+size_t pkt_buf_size = 0;
 int fd;
 int fb_id;
-uint32_t plane_id, crtc_id;
+uint32_t plane_id, crtc_id, conn_id, hdr_metadata_blob_id, pixel_format;
 int frm_eos;
 int crtc_width;
 int crtc_height;
 RK_U32 frm_width;
 RK_U32 frm_height;
 int fb_x, fb_y, fb_width, fb_height;
+
+uint8_t last_colorspace = 0xFF;
+bool last_hdr_state = false;
 
 pthread_t tid_frame, tid_display;
 pthread_mutex_t mutex;
@@ -69,6 +112,12 @@ drmModeRes *resources = NULL;
 drmModePlaneRes *plane_resources = NULL;
 drmModeCrtcPtr crtc = {0};
 
+drmModePropertyPtr hdr_metadata_prop = NULL;
+
+drmModeAtomicReqPtr drm_request = NULL;
+drmModePropertyPtr plane_props[32];
+drmModePropertyPtr conn_props[32];
+
 MppCtx mpi_ctx;
 MppApi *mpi_api;
 MppPacket mpi_packet;
@@ -79,6 +128,17 @@ struct {
   int fb_id;
   uint32_t handle;
 } frame_to_drm[MAX_FRAMES];
+
+int set_atomic_property(drmModeAtomicReq *request, uint32_t id, drmModePropertyPtr *props, char *name, uint64_t value) {
+   while (*props) {
+       if (!strcasecmp(name, (*props)->name)) {
+           return drmModeAtomicAddProperty(request, id, (*props)->prop_id, value);
+       }
+       props++;
+   }
+
+   return -EINVAL;
+}
 
 void *display_thread(void *param) {
 
@@ -104,12 +164,30 @@ void *display_thread(void *param) {
     ret = pthread_mutex_unlock(&mutex);
     assert(!ret);
 
-    // show DRM FB in overlay plane (auto vsynced/atomic !)
-    ret = drmModeSetPlane(fd, plane_id, crtc_id, _fb_id, 0,
-            fb_x, fb_y, fb_width, fb_height,
-            0, 0, frm_width << 16, frm_height << 16);
-    assert(!ret);
+    uint32_t v4l2_colorspace;
+    switch (last_colorspace) {
+    default:
+      fprintf(stderr, "Unknown frame colorspace: %d\n", last_colorspace);
+      /* fall-through */
+    case COLORSPACE_REC_601:
+      v4l2_colorspace = V4L2_COLORSPACE_SMPTE170M;
+      break;
+    case COLORSPACE_REC_709:
+      v4l2_colorspace = V4L2_COLORSPACE_REC709;
+      break;
+    case COLORSPACE_REC_2020:
+      v4l2_colorspace = V4L2_COLORSPACE_BT2020;
+      break;
+    }
+    set_atomic_property(drm_request, plane_id, plane_props, "COLOR_SPACE", v4l2_colorspace);
+    set_atomic_property(drm_request, plane_id, plane_props, "EOTF", last_hdr_state ? 2 : 0); // PQ or SDR
+    set_atomic_property(drm_request, plane_id, plane_props, "FB_ID", _fb_id);
+
+    ret = drmModeAtomicCommit(fd, drm_request, DRM_MODE_ATOMIC_NONBLOCK, NULL);
+    assert(!ret || errno == EBUSY);
   }
+
+  return NULL;
 }
 
 void *frame_thread(void *param) {
@@ -166,15 +244,15 @@ void *frame_thread(void *param) {
 
           // new DRM buffer
           struct drm_mode_create_dumb dmcd = {0};
-          dmcd.bpp = fmt == MPP_FMT_YUV420SP ? 8:10;
+          dmcd.bpp = 8; // hor_stride is already adjusted for 10 vs 8 bit
           dmcd.width = hor_stride;
           dmcd.height = ver_stride * 2; // documentation say not v*2/3 but v*2 (additional info included)
           do {
             ret = ioctl(fd, DRM_IOCTL_MODE_CREATE_DUMB, &dmcd);
           } while (ret == -1 && (errno == EINTR || errno == EAGAIN));
           assert(!ret);
-          assert(dmcd.pitch == (fmt == MPP_FMT_YUV420SP?hor_stride:hor_stride * 10 / 8));
-          assert(dmcd.size == (fmt == MPP_FMT_YUV420SP?hor_stride:hor_stride * 10 / 8) * ver_stride * 2);
+          assert(dmcd.pitch == dmcd.width);
+          assert(dmcd.size == dmcd.pitch * dmcd.height);
           frame_to_drm[i].handle = dmcd.handle;
 
           // commit DRM buffer to frame group
@@ -197,17 +275,31 @@ void *frame_thread(void *param) {
           uint32_t handles[4] = {0}, pitches[4] = {0}, offsets[4] = {0};
           handles[0] = frame_to_drm[i].handle;
           offsets[0] = 0;
-          pitches[0] = hor_stride;
+          pitches[0] = dmcd.pitch;
           handles[1] = frame_to_drm[i].handle;
-          offsets[1] = hor_stride * ver_stride;
-          pitches[1] = hor_stride;
-          ret = drmModeAddFB2(fd, frm_width, frm_height, fmt == MPP_FMT_YUV420SP ? DRM_FORMAT_NV12:DRM_FORMAT_NV12_10, handles, pitches, offsets, &frame_to_drm[i].fb_id, 0);
+          offsets[1] = pitches[0] * ver_stride;
+          pitches[1] = dmcd.pitch;
+          ret = drmModeAddFB2(fd, frm_width, frm_height, pixel_format, handles, pitches, offsets, &frame_to_drm[i].fb_id, 0);
           assert(!ret);
         }
         // register external frame group
         ret = mpi_api->control(mpi_ctx, MPP_DEC_SET_EXT_BUF_GROUP, mpi_frm_grp);
         ret = mpi_api->control(mpi_ctx, MPP_DEC_SET_INFO_CHANGE_READY, NULL);
 
+        // Set atomic properties for the plane prior to the first commit
+        set_atomic_property(drm_request, plane_id, plane_props, "CRTC_ID", crtc_id);
+        set_atomic_property(drm_request, plane_id, plane_props, "SRC_X", 0 << 16);
+        set_atomic_property(drm_request, plane_id, plane_props, "SRC_Y", 0 << 16);
+        set_atomic_property(drm_request, plane_id, plane_props, "SRC_W", frm_width << 16);
+        set_atomic_property(drm_request, plane_id, plane_props, "SRC_H", frm_height << 16);
+        set_atomic_property(drm_request, plane_id, plane_props, "CRTC_X", fb_x);
+        set_atomic_property(drm_request, plane_id, plane_props, "CRTC_Y", fb_y);
+        set_atomic_property(drm_request, plane_id, plane_props, "CRTC_W", fb_width);
+        set_atomic_property(drm_request, plane_id, plane_props, "CRTC_H", fb_height);
+        set_atomic_property(drm_request, plane_id, plane_props, "ZPOS", 0);
+
+        // Set atomic properties on the connector
+        set_atomic_property(drm_request, conn_id, conn_props, "allm_enable", 1); // HDMI ALLM (Game Mode)
       } else {
         // regular frame received
 
@@ -254,18 +346,15 @@ int rk_setup(int videoFormat, int width, int height, int redrawRate, void* conte
   int ret;
   int i;
   int j;
-  int format = 0;
+  int format;
 
-  switch (videoFormat) {
-    case VIDEO_FORMAT_H264:
-      format = RK_H264;
-      break;
-    case VIDEO_FORMAT_H265:
-      format = RK_H265;
-      break;
-    default:
-      fprintf(stderr, "Video format not supported\n");
-      return -1;
+  if (videoFormat & VIDEO_FORMAT_MASK_H264) {
+    format = RK_H264;
+  } else if (videoFormat & VIDEO_FORMAT_MASK_H265) {
+    format = RK_H265;
+  } else {
+    fprintf(stderr, "Video format not supported\n");
+    return -1;
   }
 
   MppCodingType mpp_type = (MppCodingType)format;
@@ -290,6 +379,24 @@ int rk_setup(int videoFormat, int width, int height, int redrawRate, void* conte
     drmModeFreeConnector(connector);
   }
   assert(i < resources->count_connectors);
+
+  conn_id = connector->connector_id;
+
+  {
+    drmModeObjectPropertiesPtr props = drmModeObjectGetProperties(fd, conn_id, DRM_MODE_OBJECT_CONNECTOR);
+    assert(props->count_props < sizeof(conn_props) / sizeof(conn_props[0]));
+    for (j = 0; j < props->count_props; j++) {
+      drmModePropertyPtr prop = drmModeGetProperty(fd, props->props[j]);
+      if (!prop) {
+        continue;
+      }
+      if (!strcmp(prop->name, "HDR_OUTPUT_METADATA")) {
+        hdr_metadata_prop = prop;
+      }
+      conn_props[j] = prop;
+    }
+    drmModeFreeObjectProperties(props);
+  }
 
   for (i = 0; i < resources->count_encoders; ++i) {
     encoder = drmModeGetEncoder(fd, resources->encoders[i]);
@@ -318,6 +425,10 @@ int rk_setup(int videoFormat, int width, int height, int redrawRate, void* conte
 
   ret = drmSetClientCap(fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
   assert(!ret);
+  ret = drmSetClientCap(fd, DRM_CLIENT_CAP_ATOMIC, 1);
+  assert(!ret);
+  drm_request = drmModeAtomicAlloc();
+  assert(drm_request);
   plane_resources = drmModeGetPlaneResources(fd);
   assert(plane_resources);
 
@@ -328,11 +439,19 @@ int rk_setup(int videoFormat, int width, int height, int redrawRate, void* conte
       continue;
     }
     for (j = 0; j < ovr->count_formats; j++) {
-      if (ovr->formats[j] ==  DRM_FORMAT_NV12) {
+      if (videoFormat & VIDEO_FORMAT_MASK_10BIT) {
+        // 10-bit formats use NA12 (vendor-defined) or NV15 (upstreamed in 5.10+)
+        if (ovr->formats[j] == DRM_FORMAT_NA12 || ovr->formats[j] == DRM_FORMAT_NV15) {
+          break;
+        }
+      } else if (ovr->formats[j] == DRM_FORMAT_NV12) {
+        // 8-bit formats always use NV12
         break;
       }
     }
-    if (j == ovr->count_formats) {
+    if (j < ovr->count_formats) {
+      pixel_format = ovr->formats[j];
+    } else {
       continue;
     }
     if ((ovr->possible_crtcs & crtc_bit) && !ovr->crtc_id) {
@@ -341,19 +460,27 @@ int rk_setup(int videoFormat, int width, int height, int redrawRate, void* conte
         continue;
       }
 
-      for (j = 0; j < props->count_props && !plane_id; j++) {
+      assert(props->count_props < sizeof(plane_props) / sizeof(plane_props[0]));
+      for (j = 0; j < props->count_props; j++) {
         drmModePropertyPtr prop = drmModeGetProperty(fd, props->props[j]);
         if (!prop) {
           continue;
         }
-        if (!strcmp(prop->name, "type") && props->prop_values[j] == DRM_PLANE_TYPE_OVERLAY) {
+        plane_props[j] = prop;
+        if (!strcmp(prop->name, "type") && (props->prop_values[j] == DRM_PLANE_TYPE_OVERLAY ||
+                                            props->prop_values[j] == DRM_PLANE_TYPE_PRIMARY)) {
           plane_id = ovr->plane_id;
         }
-        drmModeFreeProperty(prop);
       }
-      drmModeFreeObjectProperties(props);
       if (plane_id) {
-          break;
+        drmModeFreeObjectProperties(props);
+        break;
+      } else {
+        for (j = 0; j < props->count_props; j++) {
+          drmModeFreeProperty(plane_props[j]);
+          plane_props[j] = NULL;
+        }
+        drmModeFreeObjectProperties(props);
       }
     }
     drmModeFreePlane(ovr);
@@ -365,9 +492,8 @@ int rk_setup(int videoFormat, int width, int height, int redrawRate, void* conte
 
   // MPI SETUP
 
-  pkt_buf = malloc(READ_BUF_SIZE);
-  assert(pkt_buf);
-  ret = mpp_packet_init(&mpi_packet, pkt_buf, READ_BUF_SIZE);
+  ensure_buf_size(&pkt_buf, &pkt_buf_size, INITIAL_DECODER_BUFFER_SIZE);
+  ret = mpp_packet_init(&mpi_packet, pkt_buf, pkt_buf_size);
   assert(!ret);
 
   ret = mpp_create(&mpi_ctx, &mpi_api);
@@ -446,36 +572,103 @@ void rk_cleanup() {
   mpp_destroy(mpi_ctx);
   free(pkt_buf);
 
+  // Undo the connector-wide changes we performed
+  drmModeAtomicSetCursor(drm_request, 0);
+  set_atomic_property(drm_request, conn_id, conn_props, "HDR_OUTPUT_METADATA", 0);
+  set_atomic_property(drm_request, conn_id, conn_props, "allm_enable", 0);
+  drmModeAtomicCommit(fd, drm_request, DRM_MODE_ATOMIC_ALLOW_MODESET, NULL);
+
+  if (hdr_metadata_blob_id) {
+    drmModeDestroyPropertyBlob(fd, hdr_metadata_blob_id);
+    hdr_metadata_blob_id = 0;
+  }
+
+  drmModeAtomicFree(drm_request);
   drmModeFreePlane(ovr);
   drmModeFreePlaneResources(plane_resources);
   drmModeFreeEncoder(encoder);
   drmModeFreeConnector(connector);
   drmModeFreeCrtc(crtc);
   drmModeFreeResources(resources);
+
   close(fd);
 }
 
 int rk_submit_decode_unit(PDECODE_UNIT decodeUnit) {
 
   int result = DR_OK;
+  PLENTRY entry = decodeUnit->bufferList;
+  int length = 0;
 
-  if (decodeUnit->fullLength < READ_BUF_SIZE) {
-    PLENTRY entry = decodeUnit->bufferList;
-    int length = 0;
-    while (entry != NULL) {
-      memcpy(pkt_buf+length, entry->data, entry->length);
-      length += entry->length;
-      entry = entry->next;
-    }
-    if (length) {
-      mpp_packet_set_pos(mpi_packet, pkt_buf);
-      mpp_packet_set_length(mpi_packet, length);
+  if (ensure_buf_size(&pkt_buf, &pkt_buf_size, decodeUnit->fullLength)) {
+    // Buffer was reallocated, so update the mpp_packet accordingly
+    mpp_packet_set_data(mpi_packet, pkt_buf);
+    mpp_packet_set_size(mpi_packet, pkt_buf_size);
+  }
 
-      while (MPP_OK != mpi_api->decode_put_packet(mpi_ctx, mpi_packet))
-        ;
+  while (entry != NULL) {
+    memcpy(pkt_buf+length, entry->data, entry->length);
+    length += entry->length;
+    entry = entry->next;
+  }
 
+  mpp_packet_set_pos(mpi_packet, pkt_buf);
+  mpp_packet_set_length(mpi_packet, length);
+
+  if (last_hdr_state != decodeUnit->hdrActive) {
+    if (hdr_metadata_prop != NULL) {
+      int err;
+
+      if (hdr_metadata_blob_id) {
+        drmModeDestroyPropertyBlob(fd, hdr_metadata_blob_id);
+        hdr_metadata_blob_id = 0;
+      }
+
+      if (decodeUnit->hdrActive) {
+        struct rk_hdr_output_metadata outputMetadata;
+        SS_HDR_METADATA sunshineHdrMetadata;
+
+        // Sunshine will have HDR metadata but GFE will not
+        if (!LiGetHdrMetadata(&sunshineHdrMetadata)) {
+          memset(&sunshineHdrMetadata, 0, sizeof(sunshineHdrMetadata));
+        }
+
+        outputMetadata.metadata_type = 0; // HDMI_STATIC_METADATA_TYPE1
+        outputMetadata.hdmi_metadata_type1.eotf = 2; // SMPTE ST 2084
+        outputMetadata.hdmi_metadata_type1.metadata_type = 0; // Static Metadata Type 1
+        for (int i = 0; i < 3; i++) {
+          outputMetadata.hdmi_metadata_type1.display_primaries[i].x = sunshineHdrMetadata.displayPrimaries[i].x;
+          outputMetadata.hdmi_metadata_type1.display_primaries[i].y = sunshineHdrMetadata.displayPrimaries[i].y;
+        }
+        outputMetadata.hdmi_metadata_type1.white_point.x = sunshineHdrMetadata.whitePoint.x;
+        outputMetadata.hdmi_metadata_type1.white_point.y = sunshineHdrMetadata.whitePoint.y;
+        outputMetadata.hdmi_metadata_type1.max_display_mastering_luminance = sunshineHdrMetadata.maxDisplayLuminance;
+        outputMetadata.hdmi_metadata_type1.min_display_mastering_luminance = sunshineHdrMetadata.minDisplayLuminance;
+        outputMetadata.hdmi_metadata_type1.max_cll = sunshineHdrMetadata.maxContentLightLevel;
+        outputMetadata.hdmi_metadata_type1.max_fall = sunshineHdrMetadata.maxFrameAverageLightLevel;
+
+        err = drmModeCreatePropertyBlob(fd, &outputMetadata, sizeof(outputMetadata), &hdr_metadata_blob_id);
+        if (err < 0) {
+          hdr_metadata_blob_id = 0;
+          fprintf(stderr, "Failed to create HDR metadata blob: %d\n", errno);
+        }
+      }
+
+      err = drmModeObjectSetProperty(fd, conn_id, DRM_MODE_OBJECT_CONNECTOR, hdr_metadata_prop->prop_id, hdr_metadata_blob_id);
+      if (err < 0) {
+        fprintf(stderr, "Failed to set HDR metadata: %d\n", errno);
+      } else {
+        printf("Set display HDR mode: %s\n", decodeUnit->hdrActive ? "active" : "inactive");
+      }
+    } else {
+      fprintf(stderr, "HDR_OUTPUT_METADATA property is not supported by your display/kernel. Do you have an HDR display connected?\n");
     }
   }
+
+  last_colorspace = decodeUnit->colorspace;
+  last_hdr_state = decodeUnit->hdrActive;
+
+  while (MPP_OK != mpi_api->decode_put_packet(mpi_ctx, mpi_packet));
 
   return result;
 }
