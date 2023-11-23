@@ -41,8 +41,9 @@
 #include <rockchip/rk_mpi.h>
 
 #define MAX_FRAMES 16
-#define RK_H264 7
-#define RK_H265 16777220
+#define RK_H264 0x7
+#define RK_H265 0x1000004
+#define RK_AV1  0x1000008
 
 // Vendor-defined 10-bit format code used prior to 5.10
 #ifndef DRM_FORMAT_NA12
@@ -52,6 +53,14 @@
 // Upstreamed 10-bit format code used on 5.10+ kernels
 #ifndef DRM_FORMAT_NV15
 #define DRM_FORMAT_NV15 fourcc_code('N', 'V', '1', '5')
+#endif
+
+// Values for "Colorspace" connector property
+#ifndef DRM_MODE_COLORIMETRY_DEFAULT
+#define DRM_MODE_COLORIMETRY_DEFAULT     0
+#endif
+#ifndef DRM_MODE_COLORIMETRY_BT2020_RGB
+#define DRM_MODE_COLORIMETRY_BT2020_RGB  9
 #endif
 
 // HDR structs copied from linux include/linux/hdmi.h for older libdrm versions
@@ -97,6 +106,7 @@ int crtc_height;
 RK_U32 frm_width;
 RK_U32 frm_height;
 int fb_x, fb_y, fb_width, fb_height;
+bool atomic;
 
 uint8_t last_colorspace = 0xFF;
 bool last_hdr_state = false;
@@ -129,21 +139,23 @@ struct {
   uint32_t handle;
 } frame_to_drm[MAX_FRAMES];
 
-int set_atomic_property(drmModeAtomicReq *request, uint32_t id, drmModePropertyPtr *props, char *name, uint64_t value) {
-   while (*props) {
-       if (!strcasecmp(name, (*props)->name)) {
-           return drmModeAtomicAddProperty(request, id, (*props)->prop_id, value);
-       }
-       props++;
-   }
+int set_property(uint32_t id, uint32_t type, drmModePropertyPtr *props, char *name, uint64_t value) {
+  while (*props) {
+    if (!strcasecmp(name, (*props)->name)) {
+      if (atomic)
+        return drmModeAtomicAddProperty(drm_request, id, (*props)->prop_id, value);
+      else
+        return drmModeObjectSetProperty(fd, id, type, (*props)->prop_id, value);
+    }
+    props++;
+  }
 
-   return -EINVAL;
+  fprintf(stderr, "Property '%s' not found\n", name);
+  return -EINVAL;
 }
 
 void *display_thread(void *param) {
-
   int ret;
-
   while (!frm_eos) {
     int _fb_id;
 
@@ -164,27 +176,16 @@ void *display_thread(void *param) {
     ret = pthread_mutex_unlock(&mutex);
     assert(!ret);
 
-    uint32_t v4l2_colorspace;
-    switch (last_colorspace) {
-    default:
-      fprintf(stderr, "Unknown frame colorspace: %d\n", last_colorspace);
-      /* fall-through */
-    case COLORSPACE_REC_601:
-      v4l2_colorspace = V4L2_COLORSPACE_SMPTE170M;
-      break;
-    case COLORSPACE_REC_709:
-      v4l2_colorspace = V4L2_COLORSPACE_REC709;
-      break;
-    case COLORSPACE_REC_2020:
-      v4l2_colorspace = V4L2_COLORSPACE_BT2020;
-      break;
+    if (atomic) {
+      // We may need to modeset to apply colorspace changes when toggling HDR
+      set_property(plane_id, DRM_MODE_OBJECT_PLANE, plane_props, "FB_ID", _fb_id);
+      ret = drmModeAtomicCommit(fd, drm_request, DRM_MODE_ATOMIC_ALLOW_MODESET, NULL);
+    } else {
+      ret = drmModeSetPlane(fd, plane_id, crtc_id, _fb_id, 0,
+                            fb_x, fb_y, fb_width, fb_height,
+                            0, 0, frm_width << 16, frm_height << 16);
     }
-    set_atomic_property(drm_request, plane_id, plane_props, "COLOR_SPACE", v4l2_colorspace);
-    set_atomic_property(drm_request, plane_id, plane_props, "EOTF", last_hdr_state ? 2 : 0); // PQ or SDR
-    set_atomic_property(drm_request, plane_id, plane_props, "FB_ID", _fb_id);
-
-    ret = drmModeAtomicCommit(fd, drm_request, DRM_MODE_ATOMIC_NONBLOCK, NULL);
-    assert(!ret || errno == EBUSY);
+    assert(!ret);
   }
 
   return NULL;
@@ -287,19 +288,22 @@ void *frame_thread(void *param) {
         ret = mpi_api->control(mpi_ctx, MPP_DEC_SET_INFO_CHANGE_READY, NULL);
 
         // Set atomic properties for the plane prior to the first commit
-        set_atomic_property(drm_request, plane_id, plane_props, "CRTC_ID", crtc_id);
-        set_atomic_property(drm_request, plane_id, plane_props, "SRC_X", 0 << 16);
-        set_atomic_property(drm_request, plane_id, plane_props, "SRC_Y", 0 << 16);
-        set_atomic_property(drm_request, plane_id, plane_props, "SRC_W", frm_width << 16);
-        set_atomic_property(drm_request, plane_id, plane_props, "SRC_H", frm_height << 16);
-        set_atomic_property(drm_request, plane_id, plane_props, "CRTC_X", fb_x);
-        set_atomic_property(drm_request, plane_id, plane_props, "CRTC_Y", fb_y);
-        set_atomic_property(drm_request, plane_id, plane_props, "CRTC_W", fb_width);
-        set_atomic_property(drm_request, plane_id, plane_props, "CRTC_H", fb_height);
-        set_atomic_property(drm_request, plane_id, plane_props, "ZPOS", 0);
+        if (atomic) {
+          set_property(plane_id, DRM_MODE_OBJECT_PLANE, plane_props, "CRTC_ID", crtc_id);
+          set_property(plane_id, DRM_MODE_OBJECT_PLANE, plane_props, "SRC_X", 0 << 16);
+          set_property(plane_id, DRM_MODE_OBJECT_PLANE, plane_props, "SRC_Y", 0 << 16);
+          set_property(plane_id, DRM_MODE_OBJECT_PLANE, plane_props, "SRC_W", frm_width << 16);
+          set_property(plane_id, DRM_MODE_OBJECT_PLANE, plane_props, "SRC_H", frm_height << 16);
+          set_property(plane_id, DRM_MODE_OBJECT_PLANE, plane_props, "CRTC_X", fb_x);
+          set_property(plane_id, DRM_MODE_OBJECT_PLANE, plane_props, "CRTC_Y", fb_y);
+          set_property(plane_id, DRM_MODE_OBJECT_PLANE, plane_props, "CRTC_W", fb_width);
+          set_property(plane_id, DRM_MODE_OBJECT_PLANE, plane_props, "CRTC_H", fb_height);
+          set_property(plane_id, DRM_MODE_OBJECT_PLANE, plane_props, "ZPOS", 0);
+        }
 
-        // Set atomic properties on the connector
-        set_atomic_property(drm_request, conn_id, conn_props, "allm_enable", 1); // HDMI ALLM (Game Mode)
+        // Set properties on the connector
+        set_property(conn_id, DRM_MODE_OBJECT_CONNECTOR, conn_props, "allm_enable", 1); // HDMI ALLM (Game Mode)
+        set_property(conn_id, DRM_MODE_OBJECT_CONNECTOR, conn_props, "Colorspace", last_hdr_state ? DRM_MODE_COLORIMETRY_BT2020_RGB : DRM_MODE_COLORIMETRY_DEFAULT);
       } else {
         // regular frame received
 
@@ -352,17 +356,30 @@ int rk_setup(int videoFormat, int width, int height, int redrawRate, void* conte
     format = RK_H264;
   } else if (videoFormat & VIDEO_FORMAT_MASK_H265) {
     format = RK_H265;
+  } else if (videoFormat & VIDEO_FORMAT_MASK_AV1) {
+    format = RK_AV1;
   } else {
     fprintf(stderr, "Video format not supported\n");
     return -1;
   }
 
+  // We need atomic plane properties for HDR, but atomic seems to perform quite bad
+  // on RK3588 for some reason. The performance of commits seems to go down the longer
+  // the stream runs. We'll use the legacy API for non-HDR streams as a workaround.
+  atomic = !!(videoFormat & VIDEO_FORMAT_MASK_10BIT);
+
   MppCodingType mpp_type = (MppCodingType)format;
   ret = mpp_check_support_format(MPP_CTX_DEC, mpp_type);
-  assert(!ret);
+  if (ret) {
+    fprintf(stderr, "Selected video format is not supported\n");
+    return -1;
+  }
 
   fd = open("/dev/dri/card0", O_RDWR | O_CLOEXEC);
-  assert(fd >= 0);
+  if (fd < 0) {
+    fprintf(stderr, "Unable to open card0: %d\n", errno);
+    return -1;
+  }
 
   resources = drmModeGetResources(fd);
   assert(resources);
@@ -425,10 +442,12 @@ int rk_setup(int videoFormat, int width, int height, int redrawRate, void* conte
 
   ret = drmSetClientCap(fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
   assert(!ret);
-  ret = drmSetClientCap(fd, DRM_CLIENT_CAP_ATOMIC, 1);
-  assert(!ret);
-  drm_request = drmModeAtomicAlloc();
-  assert(drm_request);
+  if (atomic) {
+    ret = drmSetClientCap(fd, DRM_CLIENT_CAP_ATOMIC, 1);
+    assert(!ret);
+    drm_request = drmModeAtomicAlloc();
+    assert(drm_request);
+  }
   plane_resources = drmModeGetPlaneResources(fd);
   assert(plane_resources);
 
@@ -497,7 +516,10 @@ int rk_setup(int videoFormat, int width, int height, int redrawRate, void* conte
   assert(!ret);
 
   ret = mpp_create(&mpi_ctx, &mpi_api);
-  assert(!ret);
+  if (ret) {
+    fprintf(stderr, "mpp_create() failed: %d\n", ret);
+    return -1;
+  }
 
   // decoder split mode (multi-data-input) need to be set before init
   int param = 1;
@@ -505,7 +527,10 @@ int rk_setup(int videoFormat, int width, int height, int redrawRate, void* conte
   assert(!ret);
 
   ret = mpp_init(mpi_ctx, MPP_CTX_DEC, mpp_type);
-  assert(!ret);
+  if (ret) {
+    fprintf(stderr, "mpp_init() failed: %d\n", ret);
+    return -1;
+  }
 
   // set blocked read on Frame Thread
   param = MPP_POLL_BLOCK;
@@ -573,17 +598,21 @@ void rk_cleanup() {
   free(pkt_buf);
 
   // Undo the connector-wide changes we performed
-  drmModeAtomicSetCursor(drm_request, 0);
-  set_atomic_property(drm_request, conn_id, conn_props, "HDR_OUTPUT_METADATA", 0);
-  set_atomic_property(drm_request, conn_id, conn_props, "allm_enable", 0);
-  drmModeAtomicCommit(fd, drm_request, DRM_MODE_ATOMIC_ALLOW_MODESET, NULL);
+  if (atomic)
+    drmModeAtomicSetCursor(drm_request, 0);
+  set_property(conn_id, DRM_MODE_OBJECT_CONNECTOR, conn_props, "HDR_OUTPUT_METADATA", 0);
+  set_property(conn_id, DRM_MODE_OBJECT_CONNECTOR, conn_props, "allm_enable", 0);
+  set_property(conn_id, DRM_MODE_OBJECT_CONNECTOR, conn_props, "Colorspace", DRM_MODE_COLORIMETRY_DEFAULT);
+  if (atomic)
+    drmModeAtomicCommit(fd, drm_request, DRM_MODE_ATOMIC_ALLOW_MODESET, NULL);
 
   if (hdr_metadata_blob_id) {
     drmModeDestroyPropertyBlob(fd, hdr_metadata_blob_id);
     hdr_metadata_blob_id = 0;
   }
 
-  drmModeAtomicFree(drm_request);
+  if (atomic)
+    drmModeAtomicFree(drm_request);
   drmModeFreePlane(ovr);
   drmModeFreePlaneResources(plane_resources);
   drmModeFreeEncoder(encoder);
@@ -663,6 +692,28 @@ int rk_submit_decode_unit(PDECODE_UNIT decodeUnit) {
     } else {
       fprintf(stderr, "HDR_OUTPUT_METADATA property is not supported by your display/kernel. Do you have an HDR display connected?\n");
     }
+
+    // Adjust plane EOTF property
+    set_property(plane_id, DRM_MODE_OBJECT_PLANE, plane_props, "EOTF", decodeUnit->hdrActive ? 2 : 0); // PQ or SDR
+  }
+
+  if (last_colorspace != decodeUnit->colorspace) {
+    uint32_t v4l2_colorspace;
+    switch (decodeUnit->colorspace) {
+    default:
+      fprintf(stderr, "Unknown frame colorspace: %d\n", decodeUnit->colorspace);
+      /* fall-through */
+    case COLORSPACE_REC_601:
+      v4l2_colorspace = V4L2_COLORSPACE_SMPTE170M;
+      break;
+    case COLORSPACE_REC_709:
+      v4l2_colorspace = V4L2_COLORSPACE_REC709;
+      break;
+    case COLORSPACE_REC_2020:
+      v4l2_colorspace = V4L2_COLORSPACE_BT2020;
+      break;
+    }
+    set_property(plane_id, DRM_MODE_OBJECT_PLANE, plane_props, "COLOR_SPACE", v4l2_colorspace);
   }
 
   last_colorspace = decodeUnit->colorspace;

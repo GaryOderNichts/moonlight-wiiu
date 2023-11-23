@@ -105,6 +105,9 @@ static const int hat_constants[3][3] = {{HAT_UP | HAT_LEFT, HAT_UP, HAT_UP | HAT
 // Determines the maximum motion amount before allowing movement
 #define MOUSE_EMULATION_DEADZONE 2
 
+// Limited by number of bits in activeGamepadMask
+#define MAX_GAMEPADS 16
+
 static struct input_device* devices = NULL;
 static int numDevices = 0;
 static int assignedControllerIds = 0;
@@ -166,6 +169,10 @@ static void evdev_remove(int devindex) {
     devices[devindex].mouseEmulation = false;
     pthread_join(devices[devindex].meThread, NULL);
   }
+
+  libevdev_free(devices[devindex].dev);
+  loop_remove_fd(devices[devindex].fd);
+  close(devices[devindex].fd);
 
   if (devindex != numDevices && numDevices > 0)
     memcpy(&devices[devindex], &devices[numDevices], sizeof(struct input_device));
@@ -250,6 +257,62 @@ void *HandleMouseEmulation(void* param)
   return NULL;
 }
 
+#define SET_BTN_FLAG(x, y) supportedButtonFlags |= (x >= 0) ? y : 0
+
+static void send_controller_arrival(struct input_device *dev) {
+  unsigned char type = LI_CTYPE_UNKNOWN;
+  unsigned int supportedButtonFlags = 0;
+  unsigned short capabilities = 0;
+
+  switch (libevdev_get_id_vendor(dev->dev)) {
+  case 0x045e: // Microsoft
+    type = LI_CTYPE_XBOX;
+    break;
+  case 0x054c: // Sony
+    type = LI_CTYPE_PS;
+    break;
+  case 0x057e: // Nintendo
+    type = LI_CTYPE_NINTENDO;
+    break;
+  }
+
+  const char* name = libevdev_get_name(dev->dev);
+  if (name && type == LI_CTYPE_UNKNOWN) {
+
+    // Try to guess based on the name
+    if (strstr(name, "Xbox") || strstr(name, "X-Box") || strstr(name, "XBox") || strstr(name, "XBOX")) {
+      type = LI_CTYPE_XBOX;
+    }
+  }
+
+  SET_BTN_FLAG(dev->map->btn_a, A_FLAG);
+  SET_BTN_FLAG(dev->map->btn_b, B_FLAG);
+  SET_BTN_FLAG(dev->map->btn_x, X_FLAG);
+  SET_BTN_FLAG(dev->map->btn_y, Y_FLAG);
+  SET_BTN_FLAG(dev->map->btn_back, BACK_FLAG);
+  SET_BTN_FLAG(dev->map->btn_start, PLAY_FLAG);
+  SET_BTN_FLAG(dev->map->btn_guide, SPECIAL_FLAG);
+  SET_BTN_FLAG(dev->map->btn_leftstick, LS_CLK_FLAG);
+  SET_BTN_FLAG(dev->map->btn_rightstick, RS_CLK_FLAG);
+  SET_BTN_FLAG(dev->map->btn_leftshoulder, LB_FLAG);
+  SET_BTN_FLAG(dev->map->btn_rightshoulder, RB_FLAG);
+  SET_BTN_FLAG(dev->map->btn_misc1, MISC_FLAG);
+  SET_BTN_FLAG(dev->map->btn_paddle1, PADDLE1_FLAG);
+  SET_BTN_FLAG(dev->map->btn_paddle2, PADDLE2_FLAG);
+  SET_BTN_FLAG(dev->map->btn_paddle3, PADDLE3_FLAG);
+  SET_BTN_FLAG(dev->map->btn_paddle4, PADDLE4_FLAG);
+  SET_BTN_FLAG(dev->map->btn_touchpad, TOUCHPAD_FLAG);
+
+  if (dev->map->abs_lefttrigger >= 0 && dev->map->abs_righttrigger >= 0)
+    capabilities |= LI_CCAP_ANALOG_TRIGGERS;
+
+  // TODO: Probe for this properly
+  capabilities |= LI_CCAP_RUMBLE;
+
+  LiSendControllerArrivalEvent(dev->controllerId, assignedControllerIds, type,
+                               supportedButtonFlags, capabilities);
+}
+
 static bool evdev_handle_event(struct input_event *ev, struct input_device *dev) {
   bool gamepadModified = false;
 
@@ -283,7 +346,7 @@ static bool evdev_handle_event(struct input_event *ev, struct input_device *dev)
     }
     if (dev->gamepadModified) {
       if (dev->controllerId < 0) {
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < MAX_GAMEPADS; i++) {
           if ((assignedControllerIds & (1 << i)) == 0) {
             assignedControllerIds |= (1 << i);
             dev->controllerId = i;
@@ -294,6 +357,9 @@ static bool evdev_handle_event(struct input_event *ev, struct input_device *dev)
         //Use id 0 when too many gamepads are connected
         if (dev->controllerId < 0)
           dev->controllerId = 0;
+
+        // Send controller arrival event to the host
+        send_controller_arrival(dev);
       }
       // Send event only if mouse emulation is disabled.
       if (dev->mouseEmulation == false)
@@ -343,7 +409,7 @@ static bool evdev_handle_event(struct input_event *ev, struct input_device *dev)
       LiSendKeyboardEvent(code, ev->value?KEY_ACTION_DOWN:KEY_ACTION_UP, dev->modifiers);
     } else {
       int mouseCode = 0;
-      short gamepadCode = 0;
+      int gamepadCode = 0;
       int index = dev->key_map[ev->code];
 
       switch (ev->code) {
@@ -417,6 +483,18 @@ static bool evdev_handle_event(struct input_event *ev, struct input_device *dev)
           gamepadCode = BACK_FLAG;
         else if (index == dev->map->btn_guide)
           gamepadCode = SPECIAL_FLAG;
+        else if (index == dev->map->btn_misc1)
+          gamepadCode = MISC_FLAG;
+        else if (index == dev->map->btn_paddle1)
+          gamepadCode = PADDLE1_FLAG;
+        else if (index == dev->map->btn_paddle2)
+          gamepadCode = PADDLE2_FLAG;
+        else if (index == dev->map->btn_paddle3)
+          gamepadCode = PADDLE3_FLAG;
+        else if (index == dev->map->btn_paddle4)
+          gamepadCode = PADDLE4_FLAG;
+        else if (index == dev->map->btn_touchpad)
+          gamepadCode = TOUCHPAD_FLAG;
       }
 
       if (mouseCode != 0) {
@@ -931,9 +1009,9 @@ void evdev_map(char* device) {
   for (int i = 0; i < 16; i++)
     buf += sprintf(buf, "%02x", ((unsigned char*) guid)[i]);
 
-  struct mapping map;
-  strncpy(map.name, name, sizeof(map.name));
-  strncpy(map.guid, str_guid, sizeof(map.guid));
+  struct mapping map = {0};
+  strncpy(map.name, name, sizeof(map.name) - 1);
+  strncpy(map.guid, str_guid, sizeof(map.guid) - 1);
 
   libevdev_free(evdev);
   close(fd);

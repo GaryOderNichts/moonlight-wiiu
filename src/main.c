@@ -21,8 +21,8 @@
 #include "loop.h"
 #include "connection.h"
 #include "configuration.h"
-#include "config.h"
 #include "platform.h"
+#include "config.h"
 #include "sdl.h"
 
 #include "audio/audio.h"
@@ -97,7 +97,7 @@ static void stream(PSERVER_DATA server, PCONFIGURATION config, enum platform sys
   gamepads += sdl_gamepads;
   #endif
   int gamepad_mask = 0;
-  for (int i = 0; i < gamepads && i < 4; i++)
+  for (int i = 0; i < gamepads; i++)
     gamepad_mask = (gamepad_mask << 1) + 1;
 
   int ret = gs_start_app(server, &config->stream, appId, config->sops, config->localaudio, gamepad_mask);
@@ -202,7 +202,7 @@ static void help() {
   printf("\t-fps <fps>\t\tSpecify the fps to use (default 60)\n");
   printf("\t-bitrate <bitrate>\tSpecify the bitrate in Kbps\n");
   printf("\t-packetsize <size>\tSpecify the maximum packetsize in bytes\n");
-  printf("\t-codec <codec>\t\tSelect used codec: auto/h264/h265 (default auto)\n");
+  printf("\t-codec <codec>\t\tSelect used codec: auto/h264/h265/av1 (default auto)\n");
   printf("\t-hdr\t\tEnable HDR streaming (experimental, requires host and device support)\n");
   printf("\t-remote <yes/no/auto>\t\t\tEnable optimizations for WAN streaming (default auto)\n");
   printf("\t-app <app>\t\tName of app to stream\n");
@@ -298,8 +298,10 @@ int main(int argc, char* argv[]) {
     exit(-1);
   }
 
-  if (config.debug_level > 0)
+  if (config.debug_level > 0) {
     printf("GPU: %s, GFE: %s (%s, %s)\n", server.gpuType, server.serverInfo.serverInfoGfeVersion, server.gsVersion, server.serverInfo.serverInfoAppVersion);
+    printf("Server codec flags: 0x%x\n", server.serverInfo.serverCodecModeSupport);
+  }
 
   if (strcmp("list", config.action) == 0) {
     pair_check(&server);
@@ -317,9 +319,21 @@ int main(int argc, char* argv[]) {
       fprintf(stderr, "You can't select a audio device for SDL\n");
       exit(-1);
     }
-    config.stream.supportsHevc = config.codec != CODEC_H264 && (config.codec == CODEC_HEVC || platform_supports_hevc(system));
-    if (config.stream.enableHdr && !config.stream.supportsHevc) {
-      fprintf(stderr, "HDR streaming requires HEVC codec\n");
+
+    config.stream.supportedVideoFormats = VIDEO_FORMAT_H264;
+    if (config.codec == CODEC_HEVC || (config.codec == CODEC_UNSPECIFIED && platform_prefers_codec(system, CODEC_HEVC))) {
+      config.stream.supportedVideoFormats |= VIDEO_FORMAT_H265;
+      if (config.hdr)
+        config.stream.supportedVideoFormats |= VIDEO_FORMAT_H265_MAIN10;
+    }
+    if (config.codec == CODEC_AV1 || (config.codec == CODEC_UNSPECIFIED && platform_prefers_codec(system, CODEC_AV1))) {
+      config.stream.supportedVideoFormats |= VIDEO_FORMAT_AV1_MAIN8;
+      if (config.hdr)
+        config.stream.supportedVideoFormats |= VIDEO_FORMAT_AV1_MAIN10;
+    }
+
+    if (config.hdr && !(config.stream.supportedVideoFormats & VIDEO_FORMAT_MASK_10BIT)) {
+      fprintf(stderr, "HDR streaming requires HEVC or AV1 codec\n");
       exit(-1);
     }
 
@@ -372,6 +386,9 @@ int main(int argc, char* argv[]) {
 
         sdlinput_init(config.mapping);
         rumble_handler = sdlinput_rumble;
+        rumble_triggers_handler = sdlinput_rumble_triggers;
+        set_motion_event_state_handler = sdlinput_set_motion_event_state;
+        set_controller_led_handler = sdlinput_set_controller_led;
       }
       #endif
     }
