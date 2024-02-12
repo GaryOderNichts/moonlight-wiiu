@@ -17,15 +17,15 @@
 ; based on: https://gist.github.com/crearo/0d50442145b63c6c288d1c1675909990
 
 00 TEX: ADDR(48) CNT(2) VALID_PIX
-    0  SAMPLE R1, R0.xy0x, t0, s0
-    1  SAMPLE R2, R0.xy0x, t1, s1
+    0  SAMPLE R1.x___, R0.xy0x, t0, s0
+    1  SAMPLE R1._xy_, R0.xy0x, t1, s1
 01 ALU: ADDR(32) CNT(11)
-    2  x: ADD    R2.x, R2.x,    -0.5
-       y: ADD    R2.y, R2.y,    -0.5 
-    3  x: MULADD R0.x, 1.13983, R2.y, R1.x
-       y: MUL    R0.y, 0.58060, R2.y
-       z: MULADD R0.z, 2.03211, R2.x, R1.x
-       w: MUL    R0.w, 0.39465, R2.x
+    2  x: ADD    R1.y, R1.y,    -0.5
+       y: ADD    R1.z, R1.z,    -0.5 
+    3  x: MULADD R0.x, 1.13983, R1.z, R1.x
+       y: MUL    R0.y, 0.58060, R1.z
+       z: MULADD R0.z, 2.03211, R1.y, R1.x
+       w: MUL    R0.w, 0.39465, R1.y
     4  y: ADD    R0.w, R1.x,    -R0.w
     5  y: ADD    R0.y, R0.w,    -R0.y 
 02 EXP_DONE: PIX0, R0.xyz1

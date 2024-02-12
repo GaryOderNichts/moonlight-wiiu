@@ -3,6 +3,8 @@
 # to build shaders you need to place a copy of latte-assembler into the current directory
 # latte-assembler is part of decaf-emu <https://github.com/decaf-emu/decaf-emu>
 
+cd "${0%/*}"
+
 # display
 ./latte-assembler assemble --vsh=display.vsh --psh=display.psh display.gsh
 xxd -i display.gsh > display.h
