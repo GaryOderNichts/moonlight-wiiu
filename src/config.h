@@ -23,6 +23,8 @@
 
 #define MAX_INPUTS 6
 
+enum codecs { CODEC_UNSPECIFIED, CODEC_H264, CODEC_HEVC, CODEC_AV1 };
+
 typedef struct _CONFIGURATION {
   STREAM_CONFIGURATION stream;
   int debug_level;

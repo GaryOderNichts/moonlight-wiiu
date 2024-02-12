@@ -17,9 +17,7 @@
  * along with Moonlight; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "loop.h"
 #include "connection.h"
-#include "platform.h"
 #include "config.h"
 
 #include <Limelight.h>
@@ -74,7 +72,7 @@ static int get_app_id(GS_CLIENT client, PSERVER_DATA server, const char *name) {
   return -1;
 }
 
-static int stream(GS_CLIENT client, PSERVER_DATA server, PCONFIGURATION config, enum platform system) {
+static int stream(GS_CLIENT client, PSERVER_DATA server, PCONFIGURATION config) {
   int appId = get_app_id(client, server, config->app);
   if (appId<0) {
     fprintf(stderr, "Can't find app %s\n", config->app);
@@ -112,8 +110,7 @@ static int stream(GS_CLIENT client, PSERVER_DATA server, PCONFIGURATION config, 
     connection_debug = true;
   }
 
-  platform_start(system);
-  if (LiStartConnection(&server->serverInfo, &config->stream, &connection_callbacks, platform_get_video(system), platform_get_audio(system, config->audio_device), NULL, 0, config->audio_device, 0) < 0) {
+  if (LiStartConnection(&server->serverInfo, &config->stream, &connection_callbacks, &decoder_callbacks_wiiu, &audio_callbacks_wiiu, NULL, 0, config->audio_device, 0) < 0) {
     sprintf(message_buffer, "Failed to start connection\n");
     is_error = 1;
     return -1;
@@ -345,7 +342,7 @@ int main(int argc, char* argv[]) {
           // Wii U only supports H264
           config.stream.supportedVideoFormats = VIDEO_FORMAT_H264;
 
-          if (stream(client, &server, &config, WIIU) == 0) {
+          if (stream(client, &server, &config) == 0) {
             wiiu_proc_set_home_enabled(0);
             start_input_thread();
             state = STATE_STREAMING;
@@ -374,8 +371,6 @@ int main(int argc, char* argv[]) {
             printf("Sending app quit request ...\n");
           gs_quit_app(client, &server);
         }
-
-        platform_stop(WIIU);
 
         wiiu_proc_set_home_enabled(1);
         state = STATE_DISCONNECTED;

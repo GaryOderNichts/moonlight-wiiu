@@ -1,19 +1,12 @@
 # Moonlight Wii U
 
-Moonlight Wii U is a port of Moonlight Embedded, which is an open source client for [Sunshine](https://github.com/LizardByte/Sunshine) and NVIDIA GameStream.
+Moonlight Wii U is a port of [Moonlight Embedded](https://github.com/moonlight-stream/moonlight-embedded), which is an open source client for [Sunshine](https://github.com/LizardByte/Sunshine) and NVIDIA GameStream.
 
 Moonlight Wii U allows you to stream your full collection of games from your powerful Windows desktop to your Wii U.
 
-## Requirements
-
-* [GFE compatible](http://shield.nvidia.com/play-pc-games/) computer with GTX 600/700/900/1000 series GPU (for the PC you're streaming from)
-* Geforce Experience 2.1.1 or higher
-* A Wii U LAN Adapter is recommended
-
-If your PC isn't supported or you're having performance related issues, try using [sunshine](https://github.com/loki-47-6F-64/sunshine) instead.
-
 ## Quick Start
 
+* A Wii U LAN Adapter is recommended
 * Grab the latest version from the [releases page](https://github.com/GaryOderNichts/moonlight-wiiu/releases) and extract it to the root of your SD Card
 * Enter the IP of your GFE server in the `moonlight.conf` file located at `sd:/wiiu/apps/moonlight`
 * Ensure your GFE server and Wii U are on the same network
