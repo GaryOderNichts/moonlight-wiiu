@@ -19,17 +19,26 @@
 
 #pragma once
 
-#include <stdlib.h>
+#include <stddef.h>
 
 #define CERTIFICATE_FILE_NAME "client.pem"
 #define KEY_FILE_NAME "key.pem"
 
-typedef struct _HTTP_DATA {
-  char *memory;
-  size_t size;
-} HTTP_DATA, *PHTTP_DATA;
+typedef struct HTTP_T HTTP;
 
-int http_init(const char* keyDirectory, int logLevel);
-PHTTP_DATA http_create_data();
-int http_request(char* url, PHTTP_DATA data);
-void http_free_data(PHTTP_DATA data);
+typedef struct _HTTP_DATA {
+    char *memory;
+    size_t size;
+} HTTP_DATA;
+
+HTTP *http_create(const char *keydir);
+
+int http_request(HTTP *http, char *url, HTTP_DATA * data);
+
+void http_destroy(HTTP *http);
+
+void http_set_timeout(HTTP *http, int timeout);
+
+HTTP_DATA * http_data_alloc();
+
+void http_data_free(HTTP_DATA * data);

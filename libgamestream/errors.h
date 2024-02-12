@@ -30,5 +30,7 @@
 #define GS_NOT_SUPPORTED_MODE -8
 #define GS_ERROR -9
 #define GS_NOT_SUPPORTED_SOPS_RESOLUTION -10
+#define GS_BAD_CONF -11
 
-extern const char* gs_error;
+int gs_get_error(const char **message);
+const char *gs_get_error_message(void);

@@ -29,22 +29,43 @@
 #define MAX_SUPPORTED_GFE_VERSION 7
 
 typedef struct _SERVER_DATA {
-  char* gpuType;
-  bool paired;
-  bool unsupported;
-  bool isNvidiaSoftware;
-  int currentGame;
-  int serverMajorVersion;
-  char* gsVersion;
-  PDISPLAY_MODE modes;
-  SERVER_INFORMATION serverInfo;
-  unsigned short httpPort;
-  unsigned short httpsPort;
+    const char *uuid;
+    const char *mac;
+    const char *hostname;
+    const char *gpuType;
+    bool paired;
+    bool supports4K;
+    bool supportsHdr;
+    bool unsupported;
+    bool isGfe;
+    int currentGame;
+    int serverMajorVersion;
+    const char *gsVersion;
+    PDISPLAY_MODE modes;
+    SERVER_INFORMATION serverInfo;
 } SERVER_DATA, *PSERVER_DATA;
 
-int gs_init(PSERVER_DATA server, char* address, unsigned short httpPort, const char *keyDirectory, int logLevel, bool unsupported);
-int gs_start_app(PSERVER_DATA server, PSTREAM_CONFIGURATION config, int appId, bool sops, bool localaudio, int gamepad_mask);
-int gs_applist(PSERVER_DATA server, PAPP_LIST *app_list);
-int gs_unpair(PSERVER_DATA server);
-int gs_pair(PSERVER_DATA server, char* pin);
-int gs_quit_app(PSERVER_DATA server);
+typedef struct GS_CLIENT_T *GS_CLIENT;
+
+GS_CLIENT gs_new(const char *keydir);
+
+int gs_conf_init(const char *keydir);
+
+void gs_destroy(GS_CLIENT hnd);
+
+void gs_set_timeout(GS_CLIENT hnd, int timeout_secs);
+
+int gs_get_status(GS_CLIENT hnd, PSERVER_DATA server, const char *address, bool unsupported);
+
+int gs_start_app(GS_CLIENT hnd, PSERVER_DATA server, PSTREAM_CONFIGURATION config, int appId, bool is_gfe, bool sops,
+                 bool localaudio, int gamepad_mask);
+
+int gs_applist(GS_CLIENT hnd, const SERVER_DATA *server, PAPP_LIST *app_list);
+
+int gs_unpair(GS_CLIENT hnd, PSERVER_DATA server);
+
+int gs_pair(GS_CLIENT hnd, PSERVER_DATA server, const char *pin);
+
+int gs_quit_app(GS_CLIENT hnd, PSERVER_DATA server);
+
+int gs_download_cover(GS_CLIENT hnd, const SERVER_DATA *server, int appId, const char *path);

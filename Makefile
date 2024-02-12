@@ -26,7 +26,8 @@ SOURCES		:=	src \
 				third_party/moonlight-common-c/reedsolomon \
 				third_party/moonlight-common-c/enet \
 				third_party/h264bitstream \
-				third_party/libuuid
+				third_party/libuuid \
+				third_party/uuidstr
 DATA		:=	data
 INCLUDES	:=	src/wiiu \
 				libgamestream \
@@ -34,7 +35,8 @@ INCLUDES	:=	src/wiiu \
 				third_party/moonlight-common-c/reedsolomon \
 				third_party/moonlight-common-c/enet/include \
 				third_party/h264bitstream \
-				third_party/libuuid
+				third_party/libuuid \
+				third_party/uuidstr
 
 SOURCE_FILES	:=	
 
@@ -44,14 +46,14 @@ SOURCE_FILES	:=
 CFLAGS	:=	-O3 -ffunction-sections -fdata-sections \
 			$(MACHDEP)
 
-CFLAGS	+=	$(INCLUDE) -D__WIIU__ -D__WUT__ -DBIGENDIAN
+CFLAGS	+=	$(INCLUDE) -D__WIIU__ -D__WUT__ -DBIGENDIAN -DUSE_MBEDTLS
 
 CXXFLAGS	:= $(CFLAGS)
 
 ASFLAGS	:=	$(ARCH)
 LDFLAGS	=	$(ARCH) $(RPXSPECS) -Wl,-Map,$(notdir $*.map)
 
-LIBS	:= -lfreetype -lpng -lbz2 -lcurl -lssl -lcrypto -lSDL2 -lopus -lexpat -lz -lwut -lm
+LIBS	:= -lfreetype -lpng -lbz2 -lcurl -lmbedtls -lmbedx509 -lmbedcrypto -lSDL2 -lopus -lexpat -lz -lwut -lm
 
 #-------------------------------------------------------------------------------
 # list of directories containing libraries, this must be the top level

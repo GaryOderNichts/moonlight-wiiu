@@ -19,111 +19,127 @@
 
 #include "http.h"
 #include "errors.h"
+#include "set_error.h"
 
-#include <stdbool.h>
 #include <string.h>
 #include <curl/curl.h>
+#include <stdlib.h>
+#include <assert.h>
 
-static CURL *curl;
+#ifdef __WIN32
+#define PATH_SEPARATOR '\\'
+#else
+#define PATH_SEPARATOR '/'
+#endif
 
-static bool debug;
+struct HTTP_T {
+    CURL *curl;
+};
 
-static size_t _write_curl(void *contents, size_t size, size_t nmemb, void *userp)
-{
-  size_t realsize = size * nmemb;
-  PHTTP_DATA mem = (PHTTP_DATA)userp;
+static size_t write_fn(void *contents, size_t size, size_t nmemb, void *userp) {
+    size_t realsize = size * nmemb;
+    HTTP_DATA *mem = (HTTP_DATA *) userp;
 
-  mem->memory = realloc(mem->memory, mem->size + realsize + 1);
-  if(mem->memory == NULL)
-    return 0;
+    void *allocated = realloc(mem->memory, mem->size + realsize + 1);
+    assert(allocated != NULL);
+    mem->memory = allocated;
+    memcpy(&(mem->memory[mem->size]), contents, realsize);
+    mem->size += realsize;
+    mem->memory[mem->size] = 0;
 
-  memcpy(&(mem->memory[mem->size]), contents, realsize);
-  mem->size += realsize;
-  mem->memory[mem->size] = 0;
-
-  return realsize;
+    return realsize;
 }
 
-int http_init(const char* keyDirectory, int logLevel) {
-  curl = curl_easy_init();
-  debug = logLevel >= 2;
-  if (!curl)
-    return GS_FAILED;
+HTTP *http_create(const char *keydir) {
+    CURL *curl = curl_easy_init();
+    if (curl == NULL) {
+        gs_set_error(GS_ERROR, "Failed to create cURL instance");
+        return NULL;
+    }
 
-  char certificateFilePath[4096];
-  sprintf(certificateFilePath, "%s/%s", keyDirectory, CERTIFICATE_FILE_NAME);
+    char certificateFilePath[4096];
+    sprintf(certificateFilePath, "%s%c%s", keydir, PATH_SEPARATOR, CERTIFICATE_FILE_NAME);
 
-  char keyFilePath[4096];
-  sprintf(&keyFilePath[0], "%s/%s", keyDirectory, KEY_FILE_NAME);
+    char keyFilePath[4096];
+    sprintf(&keyFilePath[0], "%s%c%s", keydir, PATH_SEPARATOR, KEY_FILE_NAME);
 
-  curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
-  curl_easy_setopt(curl, CURLOPT_SSLENGINE_DEFAULT, 1L);
-  curl_easy_setopt(curl, CURLOPT_SSLCERTTYPE,"PEM");
-  curl_easy_setopt(curl, CURLOPT_SSLCERT, certificateFilePath);
-  curl_easy_setopt(curl, CURLOPT_SSLKEYTYPE, "PEM");
-  curl_easy_setopt(curl, CURLOPT_SSLKEY, keyFilePath);
-  curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
-  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, _write_curl);
-  curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
-  curl_easy_setopt(curl, CURLOPT_SSL_SESSIONID_CACHE, 0L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    curl_easy_setopt(curl, CURLOPT_SSLENGINE_DEFAULT, 1L);
+    curl_easy_setopt(curl, CURLOPT_SSLCERTTYPE, "PEM");
+    curl_easy_setopt(curl, CURLOPT_SSLCERT, certificateFilePath);
+    curl_easy_setopt(curl, CURLOPT_SSLKEYTYPE, "PEM");
+    curl_easy_setopt(curl, CURLOPT_SSLKEY, keyFilePath);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_fn);
+    curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
+    curl_easy_setopt(curl, CURLOPT_SSL_SESSIONID_CACHE, 0L);
 
-  return GS_OK;
+    struct HTTP_T *http = malloc(sizeof(struct HTTP_T));
+    assert(http != NULL);
+    http->curl = curl;
+    return http;
 }
 
-int http_request(char* url, PHTTP_DATA data) {
-  curl_easy_setopt(curl, CURLOPT_WRITEDATA, data);
-  curl_easy_setopt(curl, CURLOPT_URL, url);
+int http_request(HTTP *http, char *url, HTTP_DATA *data) {
+    assert(http != NULL);
+    assert(data != NULL);
+    if (data->size > 0) {
+        void *allocated = realloc(data->memory, 1);
+        assert(allocated != NULL);
+        data->memory = allocated;
+        data->memory[0] = 0;
+        data->size = 0;
+    }
+    CURL *curl = http->curl;
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, data);
+    curl_easy_setopt(curl, CURLOPT_URL, url);
 
-  if (debug)
-    printf("Request %s\n", url);
+    int ret = GS_FAILED;
+    CURLcode res = curl_easy_perform(curl);
 
-  if (data->size > 0) {
-    free(data->memory);
+    if (res != CURLE_OK) {
+        const char *errmsg = curl_easy_strerror(res);
+        ret = gs_set_error(GS_IO_ERROR, "cURL error: %s", errmsg);
+        goto finish;
+    }
+    assert (data->memory != NULL);
+    int http_code = 0;
+    curl_easy_getinfo(curl, CURLINFO_HTTP_CODE, &http_code);
+
+    ret = GS_OK;
+    finish:
+    return ret;
+}
+
+void http_destroy(HTTP *http) {
+    assert(http != NULL);
+    curl_easy_cleanup(http->curl);
+    free((void *) http);
+}
+
+void http_set_timeout(HTTP *http, int timeout) {
+    assert(http != NULL);
+    curl_easy_setopt(http->curl, CURLOPT_TIMEOUT, timeout);
+}
+
+HTTP_DATA *http_data_alloc() {
+    HTTP_DATA *data = malloc(sizeof(HTTP_DATA));
+    assert(data != NULL);
+
     data->memory = malloc(1);
-    if(data->memory == NULL)
-      return GS_OUT_OF_MEMORY;
-
+    assert(data->memory != NULL);
     data->size = 0;
-  }
-  CURLcode res = curl_easy_perform(curl);
 
-  if(res != CURLE_OK) {
-    gs_error = curl_easy_strerror(res);
-    return GS_FAILED;
-  } else if (data->memory == NULL) {
-    return GS_OUT_OF_MEMORY;
-  }
-
-  if (debug)
-    printf("Response:\n%s\n\n", data->memory);
-
-  return GS_OK;
+    return data;
 }
 
-void http_cleanup() {
-  curl_easy_cleanup(curl);
-}
-
-PHTTP_DATA http_create_data() {
-  PHTTP_DATA data = malloc(sizeof(HTTP_DATA));
-  if (data == NULL)
-    return NULL;
-
-  data->memory = malloc(1);
-  if(data->memory == NULL) {
-    free(data);
-    return NULL;
-  }
-  data->size = 0;
-
-  return data;
-}
-
-void http_free_data(PHTTP_DATA data) {
-  if (data != NULL) {
-    if (data->memory != NULL)
-      free(data->memory);
+void http_data_free(HTTP_DATA *data) {
+    if (data == NULL) {
+        return;
+    }
+    if (data->memory != NULL) {
+        free(data->memory);
+    }
 
     free(data);
-  }
 }

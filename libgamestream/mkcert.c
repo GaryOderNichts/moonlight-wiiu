@@ -15,115 +15,139 @@
 
 #include "mkcert.h"
 
+#include "errors.h"
+#include "set_error.h"
+
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <time.h>
 
-#include <openssl/crypto.h>
-#include <openssl/pem.h>
-#include <openssl/conf.h>
-#include <openssl/pkcs12.h>
-
-#ifndef OPENSSL_NO_ENGINE
-#include <openssl/engine.h>
-#endif
+#include <mbedtls/rsa.h>
+#include <mbedtls/x509_crt.h>
+#include <mbedtls/entropy.h>
+#include <mbedtls/ctr_drbg.h>
+#include <mbedtls/md.h>
+#include <mbedtls/error.h>
 
 static const int NUM_BITS = 2048;
 static const int SERIAL = 0;
 static const int NUM_YEARS = 10;
 
-int mkcert(X509 **x509p, EVP_PKEY **pkeyp, int bits, int serial, int years);
+static int mkcert_generate_impl(mbedtls_pk_context *key, mbedtls_x509write_cert *crt, mbedtls_ctr_drbg_context *rng) {
+    int ret;
 
-CERT_KEY_PAIR mkcert_generate() {
-    BIO *bio_err;
-    X509 *x509 = NULL;
-    EVP_PKEY *pkey = NULL;
-    PKCS12 *p12 = NULL;
+    mbedtls_mpi serial;
 
-    bio_err = BIO_new_fp(stderr, BIO_NOCLOSE);
+    mbedtls_mpi_init(&serial);
 
-    OpenSSL_add_all_algorithms();
-    ERR_load_crypto_strings();
+    char buf[512];
 
-    mkcert(&x509, &pkey, NUM_BITS, SERIAL, NUM_YEARS);
-
-    p12 = PKCS12_create("limelight", "GameStream", pkey, x509, NULL, 0, 0, 0, 0, 0);
-
-#ifndef OPENSSL_NO_ENGINE
-    ENGINE_cleanup();
-#endif
-    CRYPTO_cleanup_all_ex_data();
-
-    BIO_free(bio_err);
-
-    return (CERT_KEY_PAIR) {x509, pkey, p12};
-}
-
-void mkcert_free(CERT_KEY_PAIR certKeyPair) {
-    X509_free(certKeyPair.x509);
-    EVP_PKEY_free(certKeyPair.pkey);
-    PKCS12_free(certKeyPair.p12);
-}
-
-void mkcert_save(const char* certFile, const char* p12File, const char* keyPairFile, CERT_KEY_PAIR certKeyPair) {
-    FILE* certFilePtr = fopen(certFile, "w");
-    FILE* keyPairFilePtr = fopen(keyPairFile, "w");
-    FILE* p12FilePtr = fopen(p12File, "wb");
-
-    //TODO: error check
-    PEM_write_PrivateKey(keyPairFilePtr, certKeyPair.pkey, NULL, NULL, 0, NULL, NULL);
-    PEM_write_X509(certFilePtr, certKeyPair.x509);
-    i2d_PKCS12_fp(p12FilePtr, certKeyPair.p12);
-
-    fclose(p12FilePtr);
-    fclose(certFilePtr);
-    fclose(keyPairFilePtr);
-}
-
-int mkcert(X509 **x509p, EVP_PKEY **pkeyp, int bits, int serial, int years) {
-    EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, NULL);
-    EVP_PKEY_keygen_init(ctx);
-    EVP_PKEY_CTX_set_rsa_keygen_bits(ctx, bits);
-
-    // pk must be initialized on input
-    EVP_PKEY *pk = NULL;;
-    EVP_PKEY_keygen(ctx, &pk);
-
-    EVP_PKEY_CTX_free(ctx);
-
-    X509* cert = X509_new();
-    X509_set_version(cert, 2);
-    ASN1_INTEGER_set(X509_get_serialNumber(cert), serial);
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
-    X509_gmtime_adj(X509_get_notBefore(cert), 0);
-    X509_gmtime_adj(X509_get_notAfter(cert), 60 * 60 * 24 * 365 * years);
-#else
-    ASN1_TIME* before = ASN1_STRING_dup(X509_get0_notBefore(cert));
-    ASN1_TIME* after = ASN1_STRING_dup(X509_get0_notAfter(cert));
-
-    X509_gmtime_adj(before, 0);
-    X509_gmtime_adj(after, 60 * 60 * 24 * 365 * years);
-
-    X509_set1_notBefore(cert, before);
-    X509_set1_notAfter(cert, after);
-
-    ASN1_STRING_free(before);
-    ASN1_STRING_free(after);
-#endif
-
-    X509_set_pubkey(cert, pk);
-
-    X509_NAME* name = X509_get_subject_name(cert);
-    X509_NAME_add_entry_by_txt(name,"CN", MBSTRING_ASC, (unsigned char*)"NVIDIA GameStream Client", -1, -1, 0);
-    X509_set_issuer_name(cert, name);
-
-    if (!X509_sign(cert, pk, EVP_sha256())) {
-        goto err;
+    if ((ret = mbedtls_pk_setup(key, mbedtls_pk_info_from_type(MBEDTLS_PK_RSA))) != 0) {
+        mbedtls_strerror(ret, buf, 512);
+        ret = gs_set_error(GS_FAILED, "mbedtls_pk_setup returned -0x%04x - %s", (unsigned int) -ret, buf);
+        goto finally;
     }
 
-    *x509p = cert;
-    *pkeyp = pk;
+    if ((ret = mbedtls_rsa_gen_key(mbedtls_pk_rsa(*key), mbedtls_ctr_drbg_random, rng, NUM_BITS, 65537)) != 0) {
+        mbedtls_strerror(ret, buf, 512);
+        ret = gs_set_error(GS_FAILED, "mbedtls_rsa_gen_key returned -0x%04x - %s", (unsigned int) -ret, buf);
+        goto finally;
+    }
 
-    return(1);
-err:
-    return(0);
+    mbedtls_x509write_crt_set_subject_key(crt, key);
+    mbedtls_x509write_crt_set_issuer_key(crt, key);
+
+    mbedtls_x509write_crt_set_subject_name(crt, "CN=NVIDIA GameStream Client");
+    mbedtls_x509write_crt_set_issuer_name(crt, "CN=NVIDIA GameStream Client");
+
+    mbedtls_mpi_read_string(&serial, 10, "1");
+    mbedtls_x509write_crt_set_serial(crt, &serial);
+
+    mbedtls_x509write_crt_set_version(crt, MBEDTLS_X509_CRT_VERSION_2);
+    mbedtls_x509write_crt_set_md_alg(crt, MBEDTLS_MD_SHA256);
+
+    time_t now;
+    time(&now);
+    struct tm *ptr_time;
+    ptr_time = gmtime(&now);
+    char not_before[16], not_after[16];
+    strftime(not_before, 16, "%Y%m%d%H%M%S", ptr_time);
+    ptr_time->tm_year += NUM_YEARS;
+    strftime(not_after, 16, "%Y%m%d%H%M%S", ptr_time);
+    if ((ret = mbedtls_x509write_crt_set_validity(crt, not_before, not_after)) != 0) {
+        mbedtls_strerror(ret, buf, 512);
+        ret = gs_set_error(GS_FAILED, "mbedtls_x509write_crt_set_validity returned -0x%04x - %s", (unsigned int) -ret,
+                           buf);
+        goto finally;
+    }
+
+    finally:
+    mbedtls_mpi_free(&serial);
+    return ret;
+}
+
+int mkcert_generate(const char *certFile, const char *keyFile) {
+    int ret;
+    FILE *f;
+    char buf[4096];
+    const char *pers = "GameStream";
+
+    mbedtls_pk_context key;
+    mbedtls_x509write_cert crt;
+    mbedtls_ctr_drbg_context ctr_drbg;
+    mbedtls_entropy_context entropy;
+
+    mbedtls_pk_init(&key);
+    mbedtls_x509write_crt_init(&crt);
+    mbedtls_ctr_drbg_init(&ctr_drbg);
+    mbedtls_entropy_init(&entropy);
+
+    if ((ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, (const unsigned char *) pers,
+                                     strlen(pers))) != 0) {
+        mbedtls_strerror(ret, buf, 512);
+        ret = gs_set_error(GS_FAILED, "mbedtls_ctr_drbg_seed returned -0x%04x - %s", (unsigned int) -ret, buf);
+        goto finally;
+    }
+
+    if ((ret = mkcert_generate_impl(&key, &crt, &ctr_drbg)) != 0) {
+        goto finally;
+    }
+
+    if ((ret = mbedtls_pk_write_key_pem(&key, (unsigned char *) buf, 4096)) != 0) {
+        mbedtls_strerror(ret, buf, 512);
+        ret = gs_set_error(GS_FAILED, "mbedtls_pk_write_key_pem returned -0x%04x - %s", (unsigned int) -ret, buf);
+        goto finally;
+    }
+
+    f = fopen(keyFile, "w");
+    if (f == NULL) {
+        ret = gs_set_error(GS_IO_ERROR, "Failed to open keyFile %s for writing", keyFile);
+        goto finally;
+    }
+    fwrite(buf, strlen(buf), 1, f);
+    fflush(f);
+    fclose(f);
+
+    if ((ret = mbedtls_x509write_crt_pem(&crt, (unsigned char *) buf, 4096, mbedtls_ctr_drbg_random, &ctr_drbg)) != 0) {
+        mbedtls_strerror(ret, buf, 512);
+        ret = gs_set_error(GS_FAILED, "mbedtls_x509write_crt_pem returned -0x%04x - %s", (unsigned int) -ret, buf);
+        goto finally;
+    }
+
+    f = fopen(certFile, "w");
+    if (f == NULL) {
+        ret = gs_set_error(GS_IO_ERROR, "Failed to open certFile %s for writing", certFile);
+        goto finally;
+    }
+    fwrite(buf, strlen(buf), 1, f);
+    fflush(f);
+    fclose(f);
+
+    finally:
+    mbedtls_pk_free(&key);
+    mbedtls_x509write_crt_free(&crt);
+    mbedtls_ctr_drbg_free(&ctr_drbg);
+    mbedtls_entropy_free(&entropy);
+    return ret;
 }

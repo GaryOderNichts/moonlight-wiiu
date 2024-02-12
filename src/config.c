@@ -177,14 +177,14 @@ static void parse_argument(int c, char* value, PCONFIGURATION config) {
     config->stream.packetSize = atoi(value);
     break;
   case 'i':
-    config->app = value;
+    config->app = strdup(value);
     break;
   case 'j':
     if (config->inputsCount >= MAX_INPUTS) {
       perror("Too many inputs specified");
       exit(-1);
     }
-    config->inputs[config->inputsCount] = value;
+    config->inputs[config->inputsCount] = strdup(value);
     config->inputsCount++;
     inputAdded = true;
     break;
@@ -201,7 +201,7 @@ static void parse_argument(int c, char* value, PCONFIGURATION config) {
     config->sops = false;
     break;
   case 'm':
-    config->audio_device = value;
+    config->audio_device = strdup(value);
     break;
   case 'n':
     config->localaudio = true;
@@ -212,10 +212,10 @@ static void parse_argument(int c, char* value, PCONFIGURATION config) {
 
     break;
   case 'p':
-    config->platform = value;
+    config->platform = strdup(value);
     break;
   case 'q':
-    config->config_file = value;
+    config->config_file = strdup(value);
     break;
   case 'r':
     strcpy(config->key_dir, value);
@@ -297,9 +297,9 @@ static void parse_argument(int c, char* value, PCONFIGURATION config) {
     break;
   case 1:
     if (config->action == NULL)
-      config->action = value;
+      config->action = strdup(value);
     else if (config->address == NULL)
-      config->address = value;
+      config->address = strdup(value);
     else {
       perror("Too many options");
       exit(-1);
@@ -317,17 +317,23 @@ bool config_file_parse(char* filename, PCONFIGURATION config) {
   char *line = NULL;
   size_t len = 0;
 
+#ifdef __WIIU__
+  char* value = malloc(4096);
+  if (!value) {
+    return false;
+  }
+#endif
+
   while (getline(&line, &len, fd) != -1) {
 #ifndef __WIIU__ // Wii U doesn't like %m
   char *key = NULL, *value = NULL;
     if (sscanf(line, "%ms = %m[^\n]", &key, &value) == 2) {
 #else
     char key[1024];
-    char* value = malloc(4096);
-    if (sscanf(line, "%s = %s[^\n]", key, value) == 2) {
+    if (sscanf(line, "%1023s = %4095s[^\n]", key, value) == 2) {
 #endif
       if (strcmp(key, "address") == 0) {
-        config->address = value;
+        config->address = strdup(value);
       } else if (strcmp(key, "sops") == 0) {
         config->sops = strcmp("true", value) == 0;
       } else {
@@ -342,6 +348,10 @@ bool config_file_parse(char* filename, PCONFIGURATION config) {
       }
     }
   }
+
+#ifdef __WIIU__
+    free(value);
+#endif
   return true;
 }
 

@@ -7,6 +7,7 @@
 #include <padscore/wpad.h>
 #include <coreinit/time.h>
 #include <coreinit/alarm.h>
+#include <coreinit/thread.h>
 
 #define millis() OSTicksToMilliseconds(OSGetTime())
 

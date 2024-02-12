@@ -19,13 +19,13 @@
 
 #include "loop.h"
 #include "connection.h"
-#include "config.h"
 #include "platform.h"
+#include "config.h"
 
 #include <Limelight.h>
 
 #include <client.h>
-#include <discover.h>
+#include <errors.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -58,22 +58,9 @@ char message_buffer[1024] = "\0";
 
 int autostream = 0;
 
-static void applist(PSERVER_DATA server) {
+static int get_app_id(GS_CLIENT client, PSERVER_DATA server, const char *name) {
   PAPP_LIST list = NULL;
-  if (gs_applist(server, &list) != GS_OK) {
-    fprintf(stderr, "Can't get app list\n");
-    return;
-  }
-
-  for (int i = 1;list != NULL;i++) {
-    printf("%d. %s\n", i, list->name);
-    list = list->next;
-  }
-}
-
-static int get_app_id(PSERVER_DATA server, const char *name) {
-  PAPP_LIST list = NULL;
-  if (gs_applist(server, &list) != GS_OK) {
+  if (gs_applist(client, server, &list) != GS_OK) {
     fprintf(stderr, "Can't get app list\n");
     return -1;
   }
@@ -87,8 +74,8 @@ static int get_app_id(PSERVER_DATA server, const char *name) {
   return -1;
 }
 
-static int stream(PSERVER_DATA server, PCONFIGURATION config, enum platform system) {
-  int appId = get_app_id(server, config->app);
+static int stream(GS_CLIENT client, PSERVER_DATA server, PCONFIGURATION config, enum platform system) {
+  int appId = get_app_id(client, server, config->app);
   if (appId<0) {
     fprintf(stderr, "Can't find app %s\n", config->app);
     sprintf(message_buffer, "Can't find app %s\n", config->app);
@@ -98,10 +85,10 @@ static int stream(PSERVER_DATA server, PCONFIGURATION config, enum platform syst
 
   int gamepads = wiiu_input_num_controllers();
   int gamepad_mask = 0;
-  for (int i = 0; i < gamepads && i < 4; i++)
+  for (int i = 0; i < gamepads; i++)
     gamepad_mask = (gamepad_mask << 1) + 1;
 
-  int ret = gs_start_app(server, &config->stream, appId, config->sops, config->localaudio, gamepad_mask);
+  int ret = gs_start_app(client, server, &config->stream, appId, server->isGfe, config->sops, config->localaudio, gamepad_mask);
   if (ret < 0) {
     if (ret == GS_NOT_SUPPORTED_4K)
       fprintf(stderr, "Server doesn't support 4K\n");
@@ -110,7 +97,7 @@ static int stream(PSERVER_DATA server, PCONFIGURATION config, enum platform syst
     else if (ret == GS_NOT_SUPPORTED_SOPS_RESOLUTION)
       fprintf(stderr, "Optimal Playable Settings isn't supported for the resolution %dx%d, use supported resolution or add --nosops option\n", config->stream.width, config->stream.height);
     else if (ret == GS_ERROR)
-      fprintf(stderr, "Gamestream error: %s\n", gs_error);
+      fprintf(stderr, "Gamestream error: %s\n", gs_get_error_message());
     else
       fprintf(stderr, "Errorcode starting app: %d\n", ret);
       
@@ -126,7 +113,11 @@ static int stream(PSERVER_DATA server, PCONFIGURATION config, enum platform syst
   }
 
   platform_start(system);
-  LiStartConnection(&server->serverInfo, &config->stream, &connection_callbacks, platform_get_video(system), platform_get_audio(system, config->audio_device), NULL, 0, config->audio_device, 0);
+  if (LiStartConnection(&server->serverInfo, &config->stream, &connection_callbacks, platform_get_video(system), platform_get_audio(system, config->audio_device), NULL, 0, config->audio_device, 0) < 0) {
+    sprintf(message_buffer, "Failed to start connection\n");
+    is_error = 1;
+    return -1;
+  }
 
   return 0;
 }
@@ -176,6 +167,25 @@ int main(int argc, char* argv[]) {
 
   wiiu_stream_init(config.stream.width, config.stream.height);
 
+  GS_CLIENT client = gs_new(config.key_dir);
+  if (client == NULL && gs_get_error(NULL) == GS_BAD_CONF) {
+    if (gs_conf_init(config.key_dir) != GS_OK) {
+      fprintf(stderr, "Failed to create client info: %s\n", gs_get_error_message());
+      Font_Clear();
+      Font_Printf(8, 58, "Failed to create client info:\n %s.", gs_get_error_message());
+      state = STATE_INVALID;
+    } else {
+      client = gs_new(config.key_dir);
+    }
+  }
+
+  if (client == NULL) {
+    fprintf(stderr, "Failed to create GameStream client: %s\n", gs_get_error_message());
+    Font_Clear();
+    Font_Printf(8, 58, "Failed to create GameStream client:\n %s.", gs_get_error_message());
+    state = STATE_INVALID;
+  }
+
   SERVER_DATA server;
   while (wiiu_proc_running()) {
     switch (state) {
@@ -221,27 +231,27 @@ int main(int argc, char* argv[]) {
         Font_Draw_TVDRC();
 
         int ret;
-        if ((ret = gs_init(&server, config.address, config.port, config.key_dir, config.debug_level, config.unsupported)) == GS_OUT_OF_MEMORY) {
+        if ((ret = gs_get_status(client, &server, config.address, config.unsupported)) == GS_OUT_OF_MEMORY) {
           fprintf(stderr, "Not enough memory\n");
           sprintf(message_buffer, "Not enough memory\n");
           is_error = 1;
           state = STATE_DISCONNECTED;
           break;
         } else if (ret == GS_ERROR) {
-          fprintf(stderr, "Gamestream error: %s\n", gs_error);
-          sprintf(message_buffer, "Gamestream error:\n%s\n", gs_error);
+          fprintf(stderr, "Gamestream error: %s\n", gs_get_error_message());
+          sprintf(message_buffer, "Gamestream error:\n%s\n", gs_get_error_message());
           is_error = 1;
           state = STATE_DISCONNECTED;
           break;
         } else if (ret == GS_INVALID) {
-          fprintf(stderr, "Invalid data received from server: %s\n", gs_error);
-          sprintf(message_buffer, "Invalid data received from server:\n%s\n", gs_error);
+          fprintf(stderr, "Invalid data received from server: %s\n", gs_get_error_message());
+          sprintf(message_buffer, "Invalid data received from server:\n%s\n", gs_get_error_message());
           is_error = 1;
           state = STATE_DISCONNECTED;
           break;
         } else if (ret == GS_UNSUPPORTED_VERSION) {
-          fprintf(stderr, "Unsupported version: %s\n", gs_error);
-          sprintf(message_buffer, "Unsupported version:\n%s\n", gs_error);
+          fprintf(stderr, "Unsupported version: %s\n", gs_get_error_message());
+          sprintf(message_buffer, "Unsupported version:\n%s\n", gs_get_error_message());
           is_error = 1;
           state = STATE_DISCONNECTED;
           break;
@@ -253,8 +263,10 @@ int main(int argc, char* argv[]) {
           break;
         }
 
-        if (config.debug_level > 0)
+        if (config.debug_level > 0) {
           printf("NVIDIA %s, GFE %s (%s, %s)\n", server.gpuType, server.serverInfo.serverInfoGfeVersion, server.gsVersion, server.serverInfo.serverInfoAppVersion);
+          printf("Server codec flags: 0x%x\n", server.serverInfo.serverCodecModeSupport);
+        }
 
         if (autostream) {
           state = STATE_START_STREAM;
@@ -302,9 +314,9 @@ int main(int argc, char* argv[]) {
         Font_SetColor(255, 255, 255, 255);
         Font_Printf(8, 58, "Please enter the following PIN on the target PC:\n%s\n", pin);
         Font_Draw_TVDRC();
-        if (gs_pair(&server, &pin[0]) != GS_OK) {
-          fprintf(stderr, "Failed to pair to server: %s\n", gs_error);
-          sprintf(message_buffer, "Failed to pair to server:\n%s\n", gs_error);
+        if (gs_pair(client, &server, &pin[0]) != GS_OK) {
+          fprintf(stderr, "Failed to pair to server: %s\n", gs_get_error_message());
+          sprintf(message_buffer, "Failed to pair to server:\n%s\n", gs_get_error_message());
           is_error = 1;
         } else {
           printf("Succesfully paired\n");
@@ -330,17 +342,10 @@ int main(int argc, char* argv[]) {
         Font_Draw_TVDRC();
 
         if (server.paired) {
-          enum platform system = WIIU;
-          config.stream.supportsHevc = config.codec != CODEC_H264 && (config.codec == CODEC_HEVC || platform_supports_hevc(system));
-          if (config.stream.enableHdr && !config.stream.supportsHevc) {
-            printf("HDR streaming requires HEVC codec\n");
-            sprintf(message_buffer, "HDR streaming requires HEVC codec\n");
-            is_error = 1;
-            state = STATE_CONNECTED;
-            break;
-          }
+          // Wii U only supports H264
+          config.stream.supportedVideoFormats = VIDEO_FORMAT_H264;
 
-          if (stream(&server, &config, system) == 0) {
+          if (stream(client, &server, &config, WIIU) == 0) {
             wiiu_proc_set_home_enabled(0);
             start_input_thread();
             state = STATE_STREAMING;
@@ -367,7 +372,7 @@ int main(int argc, char* argv[]) {
         if (config.quitappafter) {
           if (config.debug_level > 0)
             printf("Sending app quit request ...\n");
-          gs_quit_app(&server);
+          gs_quit_app(client, &server);
         }
 
         platform_stop(WIIU);
