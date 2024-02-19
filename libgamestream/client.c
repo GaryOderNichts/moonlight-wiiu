@@ -711,6 +711,7 @@ int gs_start_app(GS_CLIENT hnd, PSERVER_DATA server, STREAM_CONFIGURATION *confi
         append_param(url, sizeof(url), "remoteControllersBitmap", "%d", gamepad_mask);
         append_param(url, sizeof(url), "gcmap", "%d", gamepad_mask);
     }
+    strlcat(url, LiGetLaunchUrlQueryParameters(), sizeof(url));
 
     if ((ret = http_request(hnd->http, url, data)) == GS_OK) {
         server->currentGame = appId;
