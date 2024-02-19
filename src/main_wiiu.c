@@ -130,6 +130,8 @@ int main(int argc, char* argv[]) {
   printf("Moonlight Wii U started\n");
 #endif
 
+  wiiu_net_init();
+
   wiiu_input_init();
 
   Font_Init();
@@ -382,6 +384,8 @@ int main(int argc, char* argv[]) {
   Font_Deinit();
 
   wiiu_stream_fini();
+
+  wiiu_net_shutdown();
 
   WHBGfxShutdown();
 

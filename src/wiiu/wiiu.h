@@ -66,3 +66,7 @@ void wiiu_proc_register_home_callback(void);
 int wiiu_proc_running(void);
 void wiiu_proc_stop_running(void);
 void wiiu_proc_set_home_enabled(int enabled);
+
+// net
+void wiiu_net_init(void);
+void wiiu_net_shutdown(void);
