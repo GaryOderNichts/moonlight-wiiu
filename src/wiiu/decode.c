@@ -204,5 +204,5 @@ DECODER_RENDERER_CALLBACKS decoder_callbacks_wiiu = {
   .setup = wiiu_decoder_setup,
   .cleanup = wiiu_decoder_cleanup,
   .submitDecodeUnit = wiiu_decoder_submit_decode_unit,
-  .capabilities = CAPABILITY_DIRECT_SUBMIT,
+  .capabilities = 0,
 };

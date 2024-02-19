@@ -91,5 +91,5 @@ AUDIO_RENDERER_CALLBACKS audio_callbacks_wiiu = {
   .init = sdl_renderer_init,
   .cleanup = sdl_renderer_cleanup,
   .decodeAndPlaySample = sdl_renderer_decode_and_play_sample,
-  .capabilities = CAPABILITY_DIRECT_SUBMIT | CAPABILITY_SUPPORTS_ARBITRARY_AUDIO_DURATION,
+  .capabilities = CAPABILITY_SUPPORTS_ARBITRARY_AUDIO_DURATION,
 };
