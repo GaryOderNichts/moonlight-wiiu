@@ -8,6 +8,15 @@ endif
 
 TOPDIR ?= $(CURDIR)
 
+#-------------------------------------------------------------------------------
+# APP_NAME sets the long name of the application
+# APP_SHORTNAME sets the short name of the application
+# APP_AUTHOR sets the author of the application
+#-------------------------------------------------------------------------------
+APP_NAME	:= Moonlight
+APP_SHORTNAME	:= Moonlight
+APP_AUTHOR	:= GaryOderNichts
+
 include $(DEVKITPRO)/wut/share/wut_rules
 
 #-------------------------------------------------------------------------------
@@ -37,8 +46,11 @@ INCLUDES	:=	src/wiiu \
 				third_party/h264bitstream \
 				third_party/libuuid \
 				third_party/uuidstr
-
 SOURCE_FILES	:=	
+CONTENT		:=
+ICON		:=	icon.png
+TV_SPLASH	:=
+DRC_SPLASH	:=
 
 #-------------------------------------------------------------------------------
 # options for code generation
@@ -109,6 +121,34 @@ export INCLUDE	:=	$(foreach dir,$(INCLUDES),-I$(CURDIR)/$(dir)) \
 
 export LIBPATHS	:=	$(foreach dir,$(LIBDIRS),-L$(dir)/lib)
 
+ifneq (,$(strip $(CONTENT)))
+	export APP_CONTENT := $(TOPDIR)/$(CONTENT)
+endif
+
+ifneq (,$(strip $(ICON)))
+	export APP_ICON := $(TOPDIR)/$(ICON)
+else ifneq (,$(wildcard $(TOPDIR)/$(TARGET).png))
+	export APP_ICON := $(TOPDIR)/$(TARGET).png
+else ifneq (,$(wildcard $(TOPDIR)/icon.png))
+	export APP_ICON := $(TOPDIR)/icon.png
+endif
+
+ifneq (,$(strip $(TV_SPLASH)))
+	export APP_TV_SPLASH := $(TOPDIR)/$(TV_SPLASH)
+else ifneq (,$(wildcard $(TOPDIR)/tv-splash.png))
+	export APP_TV_SPLASH := $(TOPDIR)/tv-splash.png
+else ifneq (,$(wildcard $(TOPDIR)/splash.png))
+	export APP_TV_SPLASH := $(TOPDIR)/splash.png
+endif
+
+ifneq (,$(strip $(DRC_SPLASH)))
+	export APP_DRC_SPLASH := $(TOPDIR)/$(DRC_SPLASH)
+else ifneq (,$(wildcard $(TOPDIR)/drc-splash.png))
+	export APP_DRC_SPLASH := $(TOPDIR)/drc-splash.png
+else ifneq (,$(wildcard $(TOPDIR)/splash.png))
+	export APP_DRC_SPLASH := $(TOPDIR)/splash.png
+endif
+
 .PHONY: $(BUILD) clean all dist
 
 #-------------------------------------------------------------------------------
@@ -117,6 +157,7 @@ all: $(BUILD)
 dist: all
 	cp moonlight.conf dist/wiiu/apps/moonlight/
 	cp moonlight.rpx dist/wiiu/apps/moonlight/
+	cp moonlight.wuhb dist/wiiu/apps/moonlight/
 #	cd dist; zip -FSr moonlight-wiiu.zip wiiu
 
 $(BUILD):
@@ -137,8 +178,9 @@ DEPENDS	:=	$(OFILES:.o=.d)
 #-------------------------------------------------------------------------------
 # main targets
 #-------------------------------------------------------------------------------
-all	:	$(OUTPUT).rpx
+all	:	$(OUTPUT).wuhb
 
+$(OUTPUT).wuhb	:	$(OUTPUT).rpx
 $(OUTPUT).rpx	:	$(OUTPUT).elf
 $(OUTPUT).elf	:	$(OFILES)
 

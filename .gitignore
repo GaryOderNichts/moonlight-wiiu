@@ -1,5 +1,6 @@
 /.vscode/
 /build/
+*.wuhb
 *.rpx
 *.elf
 *.gsh
