@@ -41,7 +41,7 @@ fps = 30
 ```
 bitrate = 1500
 ```
-Then slowly increate the bitrate until the stream is no longer stable.
+Then slowly increase the bitrate until the stream is no longer stable.
 
 ### Can't find app Steam
 Moonlight Wii U tries to start the app "Steam" by default, but sunshine does not have a default Application called "Steam".  
@@ -69,9 +69,3 @@ Run `make` to build moonlight.
 You can also build moonlight-wiiu using the provided Dockerfile.  
 Use `docker build -t moonlightbuilder .` to build the container.  
 Then use `docker run -it --rm -v ${PWD}:/project moonlightbuilder make` to build moonlight.  
-
-## TODO
-- double tap to drag
-- gyro support
-- rumble
-- test with gfe for fun

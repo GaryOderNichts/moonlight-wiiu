@@ -48,9 +48,9 @@ INCLUDES	:=	src/wiiu \
 				third_party/uuidstr
 SOURCE_FILES	:=	
 CONTENT		:=
-ICON		:=	icon.png
-TV_SPLASH	:=
-DRC_SPLASH	:=
+ICON		:=	res/iconTex.png
+TV_SPLASH	:=	res/bootTvTex.png
+DRC_SPLASH	:=	res/bootDrcTex.png
 
 #-------------------------------------------------------------------------------
 # options for code generation
