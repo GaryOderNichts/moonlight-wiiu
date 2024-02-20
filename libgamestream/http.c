@@ -103,7 +103,7 @@ int http_request(HTTP *http, char *url, HTTP_DATA *data) {
         goto finish;
     }
     assert (data->memory != NULL);
-    int http_code = 0;
+    long http_code = 0;
     curl_easy_getinfo(curl, CURLINFO_HTTP_CODE, &http_code);
 
     ret = GS_OK;

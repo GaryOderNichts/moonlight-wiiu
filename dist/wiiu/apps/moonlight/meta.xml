@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <app version="1">
-    <name>Moonlight WiiU</name>
+    <name>Moonlight Wii U</name>
     <coder>GaryOderNichts</coder>
-    <version>v1.5</version>
-    <release_date>20221012120000</release_date>
-    <short_description>A Moonlight port for the Nintendo WiiU</short_description>
-    <long_description>Moonlight Wii U is a port of Moonlight Embedded, which is an open source implementation of NVIDIA's GameStream, as used by the NVIDIA Shield.
-Moonlight Wii U allows you to stream your full collection of games from your powerful Windows desktop to your Wii U.</long_description>
+    <version>v1.6</version>
+    <release_date>20240220120000</release_date>
+    <short_description>A Moonlight port for the Nintendo Wii U</short_description>
+    <long_description>Moonlight Wii U is a port of Moonlight Embedded, which is an open source client for Sunshine and NVIDIA GameStream.
+Moonlight allows you to stream your full collection of games and applications from your PC to other devices to play them remotely.</long_description>
     <category>Homebrew</category>
     <url>https://github.com/GaryOderNichts/moonlight-wiiu</url>
 </app>

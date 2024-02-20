@@ -413,6 +413,7 @@ void config_parse(int argc, char* argv[], PCONFIGURATION config) {
 #endif
 
 #ifdef __WIIU__
+  // TODO test how slow audio encryption is
   config->stream.encryptionFlags = ENCFLG_NONE;
   config->stream.fps = 30;
 #endif

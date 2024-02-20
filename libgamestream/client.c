@@ -321,7 +321,7 @@ int gs_pair(GS_CLIENT hnd, PSERVER_DATA server, const char *pin) {
 
     if (server->currentGame != 0) {
         ret = GS_WRONG_STATE;
-        gs_set_error(GS_WRONG_STATE, "The computer is currently in a game. You must close the game before pairing");
+        gs_set_error(GS_WRONG_STATE, "The computer is currently in a game.\nYou must close the game before pairing.");
         goto cleanup;
     }
 
