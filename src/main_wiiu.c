@@ -22,6 +22,8 @@
 
 #include <Limelight.h>
 
+#include <SDL2/SDL.h>
+
 #include <client.h>
 #include <errors.h>
 
@@ -107,10 +109,10 @@ static int stream(GS_CLIENT client, PSERVER_DATA server, PCONFIGURATION config) 
 
   if (config->debug_level > 0) {
     printf("Stream %d x %d, %d fps, %d kbps\n", config->stream.width, config->stream.height, config->stream.fps, config->stream.bitrate);
-    connection_debug = true;
   }
 
-  if (LiStartConnection(&server->serverInfo, &config->stream, &connection_callbacks, &decoder_callbacks_wiiu, &audio_callbacks_wiiu, NULL, 0, config->audio_device, 0) < 0) {
+  if (LiStartConnection(&server->serverInfo, &config->stream, &connection_callbacks, &decoder_callbacks_wiiu, &audio_callbacks_wiiu, NULL, 0, config->audio_device, 0) != 0) {
+    fprintf(stderr, "Failed to start connection\n");
     sprintf(message_buffer, "Failed to start connection\n");
     is_error = 1;
     return -1;
@@ -122,13 +124,15 @@ static int stream(GS_CLIENT client, PSERVER_DATA server, PCONFIGURATION config) 
 int main(int argc, char* argv[]) {
   wiiu_proc_init();
 
-  WHBGfxInit();
-  wiiu_setup_renderstate();
-
 #ifdef DEBUG
   Debug_Init();
   printf("Moonlight Wii U started\n");
 #endif
+
+  WHBGfxInit();
+  wiiu_setup_renderstate();
+
+  SDL_InitSubSystem(SDL_INIT_AUDIO);
 
   wiiu_net_init();
 
@@ -313,6 +317,7 @@ int main(int argc, char* argv[]) {
         Font_SetColor(255, 255, 255, 255);
         Font_Printf(8, 58, "Please enter the following PIN on the target PC:\n%s\n", pin);
         Font_Draw_TVDRC();
+        gs_set_timeout(client, 60);
         if (gs_pair(client, &server, &pin[0]) != GS_OK) {
           fprintf(stderr, "Failed to pair to server: %s\n", gs_get_error_message());
           sprintf(message_buffer, "Failed to pair to server:\n%s\n", gs_get_error_message());
@@ -322,6 +327,7 @@ int main(int argc, char* argv[]) {
           sprintf(message_buffer, "Succesfully paired\n");
           is_error = 0;
         }
+        gs_set_timeout(client, 5);
 
         // wrong state, make sure we reconnect first
         if (server.currentGame != 0) {
@@ -386,6 +392,8 @@ int main(int argc, char* argv[]) {
   wiiu_stream_fini();
 
   wiiu_net_shutdown();
+
+  SDL_QuitSubSystem(SDL_INIT_AUDIO);
 
   WHBGfxShutdown();
 

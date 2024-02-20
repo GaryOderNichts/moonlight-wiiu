@@ -363,19 +363,25 @@ static void thread_deallocator(OSThread *thread, void *stack)
 
 void start_input_thread(void)
 {
-  thread_running = 1;
-  int stack_size = 4 * 1024 * 1024;
-  void* stack_addr = (uint8_t *)memalign(8, stack_size) + stack_size;
+  const int stack_size = 4 * 1024 * 1024;
+  uint8_t* stack = (uint8_t*)memalign(16, stack_size);
+  if (!stack) {
+    return;
+  }
 
   if (!OSCreateThread(&inputThread,
                       input_thread_proc,
                       0, NULL,
-                      stack_addr, stack_size,
+                      stack + stack_size, stack_size,
                       0x10, OS_THREAD_ATTRIB_AFFINITY_ANY))
   {
+    free(stack);
     return;
   }
 
+  thread_running = 1;
+
+  OSSetThreadName(&inputThread, "PadInput");
   OSSetThreadDeallocator(&inputThread, thread_deallocator);
   OSResumeThread(&inputThread);
 }

@@ -41,8 +41,6 @@ static int sdl_renderer_init(int audioConfiguration, POPUS_MULTISTREAM_CONFIGURA
   if (pcmBuffer == NULL)
     return -1;
 
-  SDL_InitSubSystem(SDL_INIT_AUDIO);
-
   SDL_AudioSpec want, have;
   SDL_zero(want);
   want.freq = opusConfig->sampleRate;

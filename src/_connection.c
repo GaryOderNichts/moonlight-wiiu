@@ -31,8 +31,6 @@
 #include <SDL.h>
 #endif
 
-pthread_t main_thread_id = 0;
-bool connection_debug;
 ConnListenerRumble rumble_handler = NULL;
 ConnListenerRumbleTriggers rumble_triggers_handler = NULL;
 ConnListenerSetMotionEventState set_motion_event_state_handler = NULL;
@@ -90,9 +88,6 @@ static void connection_terminated(int errorCode) {
       event.type = SDL_QUIT;
       SDL_PushEvent(&event);
   #endif
-
-  if (main_thread_id != 0)
-    pthread_kill(main_thread_id, SIGTERM);
 #else
   state = STATE_STOP_STREAM;
 #endif
@@ -111,7 +106,7 @@ static void rumble(unsigned short controllerNumber, unsigned short lowFreqMotor,
 }
 
 static void rumble_triggers(unsigned short controllerNumber, unsigned short leftTrigger, unsigned short rightTrigger) {
-  if (rumble_handler)
+  if (rumble_triggers_handler)
     rumble_triggers_handler(controllerNumber, leftTrigger, rightTrigger);
 }
 

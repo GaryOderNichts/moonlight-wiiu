@@ -345,8 +345,10 @@ bool config_file_parse(char* filename, PCONFIGURATION config) {
   }
 
 #ifdef __WIIU__
-    free(value);
+  free(value);
 #endif
+
+  fclose(fd);
   return true;
 }
 
