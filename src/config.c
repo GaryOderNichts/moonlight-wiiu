@@ -84,6 +84,7 @@ static struct option long_options[] = {
   {"swap_buttons", no_argument, NULL, 'B'},
   {"autostream", no_argument, NULL, 'C'},
   {"absolute_positioning", no_argument, NULL, 'D'},
+  {"color_range", required_argument, NULL, 'E'},
 #endif
   {"nomouseemulation", no_argument, NULL, '4'},
   {"pin", required_argument, NULL, '5'},
@@ -277,6 +278,12 @@ static void parse_argument(int c, char* value, PCONFIGURATION config) {
   case 'D':
     absolute_positioning = true;
     break;
+  case 'E':
+    if (strcasecmp(value, "full") == 0) {
+      config->stream.colorRange = COLOR_RANGE_FULL;
+    } else {
+      config->stream.colorRange = COLOR_RANGE_LIMITED;
+    }
 #endif
   case '4':
     config->mouse_emulation = false;
@@ -509,3 +516,4 @@ void config_parse(int argc, char* argv[], PCONFIGURATION config) {
     }
   }
 }
+
