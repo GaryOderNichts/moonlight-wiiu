@@ -8,6 +8,7 @@
 #include <coreinit/time.h>
 #include <coreinit/alarm.h>
 #include <coreinit/thread.h>
+#include <mic/mic.h>
 
 #define millis() OSTicksToMilliseconds(OSGetTime())
 
@@ -31,6 +32,13 @@ static uint64_t touchDownMillis = 0;
 static int thread_running;
 static OSThread inputThread;
 static OSAlarm inputAlarm;
+
+// --- ADDED: GLOBAL MICROPHONE VARIABLES ---
+static MICHandle mic_handle = -1;
+static MICWorkMemory mic_mem;
+static uint8_t* mic_buffer_raw;
+// Buffer for audio (safe size)
+#define MIC_SAMPLE_COUNT 0x3000
 
 // ~60 Hz
 #define INPUT_UPDATE_RATE OSMillisecondsToTicks(16)
@@ -96,9 +104,42 @@ void wiiu_input_init(void)
 {
 	KPADInit();
 	WPADEnableURCC(1);
+
+    // --- ADDED: MICROPHONE INITIALIZATION ---
+    // Reserve memory aligned to 0x40 bytes
+    mic_buffer_raw = (uint8_t*)memalign(0x40, MIC_SAMPLE_COUNT * 2);
+    
+    if (mic_buffer_raw) {
+        // Config structure
+        mic_mem.sampleMaxCount = MIC_SAMPLE_COUNT;
+        mic_mem.sampleBuffer = mic_buffer_raw;
+
+        MICError err;
+        // Inict GamePad mic (Instance 0)
+        mic_handle = MICInit(MIC_INSTANCE_0, 0, &mic_mem, &err);
+
+        if (mic_handle >= 0) {
+            // Open to start listening
+            MICOpen(mic_handle);
+            // printf("Mic iniciated OK. Handle: %d\n", mic_handle);
+        }
+    }
 }
 
 void wiiu_input_update(void) {
+
+//  --- ADDED: MICROPHONE READING ---
+  // Run every loop to see if there is new audio
+  if (mic_handle >= 0) {
+      MICStatus status;
+      MICGetStatus(mic_handle, &status);
+      
+      if (status.availableData > 0) {
+        MICSetDataConsumed(mic_handle, status.availableData);
+      }
+  }
+  // --------------------------------------
+
   static uint64_t home_pressed[4] = {0};
 
   short controllerNumber = 0;
