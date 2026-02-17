@@ -152,7 +152,10 @@ int main(int argc, char* argv[]) {
   config.unsupported = true;
   config.sops = false;
 
-  if (config.address == NULL) {
+  int selected_address = 0;
+  char *cur_address;
+
+  if (config.address[0] == NULL) {
     fprintf(stderr, "Specify an IP address\n");
     Font_Clear();
     Font_Print(8, 58, "Specify an IP address in the configuration file.\nMake sure to remove the '#' in front of the 'address' line.");
@@ -165,7 +168,15 @@ int main(int argc, char* argv[]) {
       config_file_parse(host_config_file, &config);
     
     // automatically connect on first launch
-    state = STATE_CONNECTING;
+    if (config.addressCount == 1)
+    {
+      cur_address = config.address[0];
+      state = STATE_CONNECTING;
+    }
+    else
+    {
+      state = STATE_DISCONNECTED;
+    }
   }
 
   wiiu_stream_init(config.stream.width, config.stream.height);
@@ -201,9 +212,16 @@ int main(int argc, char* argv[]) {
         Font_SetSize(50);
         Font_SetColor(255, 255, 255, 255);
 
-        Font_Printf(8, 58, "Moonlight Wii U %s (Disconnected)\n"
-                           SCREEN_BAR
-                           "Press \ue000 to connect to %s", VERSION_STRING, config.address);
+        Font_Printf(8, 58, "Moonlight Wii U %s (Disconnected), Press \ue000 to select\n"
+                           SCREEN_BAR, VERSION_STRING);
+        
+        for (int i = 0; i < config.addressCount; i++)
+        {
+          if (config.address[i] == NULL)
+            break;
+          Font_Printf(8, 208+i*50, "%s Connect to %s",
+                                    i == selected_address ? ">" : "  ", config.address[i]);
+          }
 
         if (is_error) {
           Font_SetColor(255, 0, 0, 255);
@@ -212,29 +230,41 @@ int main(int argc, char* argv[]) {
           Font_SetColor(0, 255, 0, 255);
         }
         Font_SetSize(50);
-        Font_Print(8, 400, message_buffer);
+        Font_Print(8, 700, message_buffer);
 
         Font_Draw_TVDRC();
 
         uint32_t btns = wiiu_input_buttons_triggered();
         if (btns & VPAD_BUTTON_A) {
           message_buffer[0] = '\0';
+          cur_address = config.address[selected_address];
           state = STATE_CONNECTING;
         }
+        else if (btns & VPAD_BUTTON_DOWN)
+        {
+          selected_address = (selected_address + 1) % config.addressCount;
+        }
+        else if (btns & VPAD_BUTTON_UP)
+        {
+          selected_address = (selected_address - 1) % config.addressCount;
+          if (selected_address < 0)
+            selected_address = 0;
+        }
+        
         break;
       }
       case STATE_CONNECTING: {
-        printf("Connecting to %s...\n", config.address);
+        printf("Connecting to %s...\n", cur_address);
 
         Font_Clear();
         Font_SetSize(50);
         Font_SetColor(255, 255, 255, 255);
 
-        Font_Printf(8, 58, "Connecting to %s...\n", config.address);
+        Font_Printf(8, 58, "Connecting to %s...\n", cur_address);
         Font_Draw_TVDRC();
 
         int ret;
-        if ((ret = gs_get_status(client, &server, config.address, config.unsupported)) == GS_OUT_OF_MEMORY) {
+        if ((ret = gs_get_status(client, &server, cur_address, config.unsupported)) == GS_OUT_OF_MEMORY) {
           fprintf(stderr, "Not enough memory\n");
           sprintf(message_buffer, "Not enough memory\n");
           is_error = 1;
@@ -259,7 +289,7 @@ int main(int argc, char* argv[]) {
           state = STATE_DISCONNECTED;
           break;
         } else if (ret != GS_OK) {
-          fprintf(stderr, "Can't connect to server %s\n", config.address);
+          fprintf(stderr, "Can't connect to server %s\n", cur_address);
           sprintf(message_buffer, "Can't connect to server\n");
           is_error = 1;
           state = STATE_DISCONNECTED;
@@ -286,7 +316,7 @@ int main(int argc, char* argv[]) {
 
         Font_Printf(8, 58, "Moonlight Wii U %s (Connected to %s)\n"
                            SCREEN_BAR
-                           "Press \ue000 to stream\nPress \ue001 to pair\n", VERSION_STRING, config.address);
+                           "Press \ue000 to stream\nPress \ue002 to pair\n\nPress \ue001 to go back\n", VERSION_STRING, cur_address);
 
         if (is_error) {
           Font_SetColor(255, 0, 0, 255);
@@ -295,17 +325,22 @@ int main(int argc, char* argv[]) {
           Font_SetColor(0, 255, 0, 255);
         }
         Font_SetSize(50);
-        Font_Print(8, 400, message_buffer);
+        Font_Print(8, 500, message_buffer);
         Font_Draw_TVDRC();
 
         uint32_t btns = wiiu_input_buttons_triggered();
         if (btns & VPAD_BUTTON_A) {
           message_buffer[0] = '\0';
           state = STATE_START_STREAM;
-        } else if (btns & VPAD_BUTTON_B) {
+        } else if (btns & VPAD_BUTTON_X) {
           message_buffer[0] = '\0';
           state = STATE_PAIRING;
         }
+        else if (btns & VPAD_BUTTON_B) {
+          message_buffer[0] = '\0';
+          state = STATE_DISCONNECTED;
+        }
+        
         break;
       }
       case STATE_PAIRING: {

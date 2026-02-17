@@ -21,6 +21,7 @@
 
 #include <stdbool.h>
 
+#define MAX_ADDRESS 6
 #define MAX_INPUTS 6
 
 enum codecs { CODEC_UNSPECIFIED, CODEC_H264, CODEC_HEVC, CODEC_AV1 };
@@ -36,7 +37,8 @@ typedef struct _CONFIGURATION {
   int debug_level;
   char* app;
   char* action;
-  char* address;
+  char* address[MAX_ADDRESS];
+  int addressCount;
   char* mapping;
   char* platform;
   char* audio_device;

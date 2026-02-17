@@ -298,8 +298,8 @@ static void parse_argument(int c, char* value, PCONFIGURATION config) {
   case 1:
     if (config->action == NULL)
       config->action = strdup(value);
-    else if (config->address == NULL)
-      config->address = strdup(value);
+    else if (config->address[0] == NULL)
+      config->address[0] = strdup(value);
     else {
       perror("Too many options");
       exit(-1);
@@ -333,7 +333,12 @@ bool config_file_parse(char* filename, PCONFIGURATION config) {
     if (sscanf(line, "%1023s = %4095s[^\n]", key, value) == 2) {
 #endif
       if (strcmp(key, "address") == 0) {
-        config->address = strdup(value);
+        if (config->addressCount >= MAX_ADDRESS) {
+          perror("Too many addresses specified");
+          exit(-1);
+        }
+        config->address[config->addressCount] = strdup(value);
+        config->addressCount++;
       } else if (strcmp(key, "sops") == 0) {
         config->sops = strcmp("true", value) == 0;
       } else {
@@ -427,7 +432,7 @@ void config_parse(int argc, char* argv[], PCONFIGURATION config) {
   config->platform = "auto";
   config->app = "Steam";
   config->action = NULL;
-  config->address = NULL;
+  config->address[0] = NULL;
   config->config_file = NULL;
   config->audio_device = NULL;
   config->sops = true;
@@ -444,6 +449,7 @@ void config_parse(int argc, char* argv[], PCONFIGURATION config) {
   config->port = 47989;
 
   config->inputsCount = 0;
+  config->addressCount = 0;
 
 #ifndef __WIIU__
   config->codec = CODEC_UNSPECIFIED;
