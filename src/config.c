@@ -330,7 +330,7 @@ bool config_file_parse(char* filename, PCONFIGURATION config) {
     if (sscanf(line, "%ms = %m[^\n]", &key, &value) == 2) {
 #else
     char key[1024];
-    if (sscanf(line, "%1023s = %4095s[^\n]", key, value) == 2) {
+    if (sscanf(line, "%1023s = %4095[^\r\n]", key, value) == 2) {
 #endif
       if (strcmp(key, "address") == 0) {
         config->address = strdup(value);
